@@ -1,5 +1,10 @@
 # Journoid changelog
 
+## 0.5.1 — 2026-08-14
+
+- Removed the leftover spacer between the home header and the first trip.
+- Reduced 2D polaroids to a compact three-column mobile gallery with thinner frames.
+
 ## 0.5.0 — 2026-08-14
 
 - Moved the version label into a compact three-dot settings menu.

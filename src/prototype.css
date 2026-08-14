@@ -253,7 +253,6 @@
 }
 
 .journey-list {
-  margin-top: clamp(48px, 10vh, 80px);
   border-bottom: 1px solid var(--line);
 }
 
@@ -268,6 +267,10 @@
   border-top: 1px solid var(--line);
   color: var(--ink);
   text-align: left;
+}
+
+.journey-row:first-child {
+  border-top: 0;
 }
 
 .journey-row:active {
@@ -613,8 +616,8 @@
 
 .polaroid-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px 6px;
 }
 
 .polaroid-entry {
@@ -624,7 +627,7 @@
 .flat-polaroid {
   display: block;
   width: 100%;
-  padding: 6px 6px 24px;
+  padding: 4px 4px 18px;
   background: var(--frame-color, #fff);
   outline: 1px solid var(--frame-outline);
   box-shadow: none;
@@ -1095,8 +1098,8 @@
   }
 
   .polaroid-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 28px 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 24px 8px;
   }
 }
 
