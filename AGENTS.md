@@ -16,6 +16,9 @@
 - The gallery is photo-first and grid-aligned: use a 4px base unit, 16px mobile gutters, 40px primary controls, 18px line icons, and 1px neutral rules. Do not use drop shadows, random rotations, staggered rows, or oversized date typography around the polaroids.
 - Use deliberate Helvetica/Pretendard typography: display tracking around `-0.055em`, body tracking around `-0.012em`, compact display leading around `0.94`, and readable body leading around `1.45–1.5`. Align labels, counts, and titles to shared left and baseline anchors.
 - The doodle editor supports 1×–3× zoom, two-finger pinch, and panning with the move tool. Frame color changes are saved per photo; the default UI stays monochrome while a custom color picker remains available.
+- The doodle editor offers a crisp pressure-aware pen, textured pencil, and translucent highlighter. Every brush supports preset and custom colors without changing the app's neutral interface palette.
+- Saved comments appear centered near the top of the full-screen 3D model view. The model uses front, back, and all four edge planes so its surface remains visible through every allowed rotation angle.
+- Batch photo imports use a dedicated full-screen progress view. Keep the underlying gallery out of sight until the responsive two-file batch pipeline has finished.
 
 ## Current Runtime Override
 

@@ -15,7 +15,9 @@ import {
   ImageIcon,
   MinusIcon,
   MoveIcon,
+  OpacityIcon,
   Pencil1Icon,
+  Pencil2Icon,
   PlusIcon,
   ResetIcon,
   TrashIcon,
@@ -62,6 +64,10 @@ const STORAGE_KEY = "journoid-trips-v2";
 const LEGACY_STORAGE_KEY = "journey-polaroid-trips-v1";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
+const DEFAULT_DRAWING_COLOR = "#111111";
+const DRAWING_COLORS = ["#111111", "#ffffff", "#ff453a", "#0a84ff", "#ffd60a"];
+
+type BrushKind = "pen" | "pencil" | "marker";
 
 function readSavedTrips(): TripRecord[] {
   try {
@@ -302,6 +308,7 @@ function TripDetail({
     setUploading(true);
     setUploadProgress({ done: 0, total: files.length });
     try {
+      await yieldToBrowser();
       let done = 0;
       for (let index = 0; index < files.length; index += 2) {
         const batch = await Promise.all(files.slice(index, index + 2).map(toPhotoRecord));
@@ -321,7 +328,7 @@ function TripDetail({
         <header className="topbar sticky-topbar">
           <button className="icon-button" type="button" onClick={onBack} aria-label="여행 목록"><ArrowLeftIcon /></button>
           <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
-            {uploading ? <span className="upload-progress">{uploadProgress.done}/{uploadProgress.total}</span> : <ImageIcon />}
+            <ImageIcon />
             <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
           </label>
         </header>
@@ -337,7 +344,7 @@ function TripDetail({
         {trip.photos.length === 0 ? (
           <button className="photo-empty" type="button" onClick={() => fileInput.current?.click()} disabled={uploading}>
             <PlusIcon />
-            <span>{uploading ? "불러오는 중" : "사진 추가"}</span>
+            <span>사진 추가</span>
           </button>
         ) : (
           <div className="timeline">
@@ -378,6 +385,8 @@ function TripDetail({
         )}
       </main>
 
+      {uploading ? <ImportOverlay done={uploadProgress.done} total={uploadProgress.total} /> : null}
+
       {selectedPhoto ? (
         <PhotoViewer
           photo={selectedPhoto}
@@ -386,6 +395,21 @@ function TripDetail({
         />
       ) : null}
     </>
+  );
+}
+
+function ImportOverlay({ done, total }: { done: number; total: number }) {
+  const progress = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="import-overlay" role="dialog" aria-modal="true" aria-label="사진 불러오기 진행 중">
+      <div className="import-progress-card">
+        <span>사진 불러오는 중</span>
+        <strong>{String(done).padStart(2, "0")} / {String(total).padStart(2, "0")}</strong>
+        <div className="import-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={Math.max(1, total)} aria-valuenow={done}>
+          <span style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -422,7 +446,10 @@ function PhotoViewer({
     const deltaX = event.clientX - current.x;
     const deltaY = event.clientY - current.y;
     drag.current = { id: current.id, x: event.clientX, y: event.clientY, distance: current.distance + Math.abs(deltaX) + Math.abs(deltaY) };
-    setRotation((value) => ({ x: Math.max(-68, Math.min(68, value.x - deltaY * 0.32)), y: value.y + deltaX * 0.4 }));
+    setRotation((value) => ({
+      x: Math.max(-72, Math.min(72, value.x - deltaY * 0.32)),
+      y: ((value.y + deltaX * 0.4 + 540) % 360) - 180,
+    }));
   };
 
   const pointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -448,6 +475,7 @@ function PhotoViewer({
 
       {mode === "model" ? (
         <div className="model-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }}>
+          {caption.trim() ? <p className="model-caption">{caption.trim()}</p> : null}
           <div
             className="polaroid-model"
             style={{
@@ -459,8 +487,10 @@ function PhotoViewer({
               <ModelPhoto photo={photo} drawing={drawing} />
             </div>
             <div className="model-face model-back" />
+            <span className="model-edge edge-top" />
             <span className="model-edge edge-right" />
             <span className="model-edge edge-bottom" />
+            <span className="model-edge edge-left" />
           </div>
         </div>
       ) : (
@@ -510,6 +540,67 @@ function pointerMidpoint(a: { x: number; y: number }, b: { x: number; y: number 
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
+function drawLine(
+  context: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  width: number,
+  color: string,
+  alpha: number,
+  offset = { x: 0, y: 0 },
+  lineCap: CanvasLineCap = "round",
+) {
+  context.globalAlpha = alpha;
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.lineCap = lineCap;
+  context.lineJoin = "round";
+  context.beginPath();
+  context.moveTo(from.x + offset.x, from.y + offset.y);
+  context.lineTo(to.x + offset.x, to.y + offset.y);
+  context.stroke();
+}
+
+function drawBrushSegment(
+  context: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  kind: BrushKind,
+  color: string,
+  size: number,
+  pressure: number,
+) {
+  context.save();
+  context.globalCompositeOperation = "source-over";
+
+  if (kind === "marker") {
+    drawLine(context, from, to, Math.max(24, size * 5), color, 0.24, { x: 0, y: 0 }, "square");
+    context.restore();
+    return;
+  }
+
+  if (kind === "pencil") {
+    const textureWidth = Math.max(0.7, size * (0.22 + pressure * 0.18));
+    const jitter = Math.max(0.6, size * 0.35);
+    for (let index = 0; index < 5; index += 1) {
+      drawLine(
+        context,
+        from,
+        to,
+        textureWidth,
+        color,
+        0.18 + Math.random() * 0.14,
+        { x: (Math.random() - 0.5) * jitter, y: (Math.random() - 0.5) * jitter },
+      );
+    }
+    context.restore();
+    return;
+  }
+
+  drawLine(context, from, to, size * (0.72 + pressure * 0.5), color, 0.96);
+  context.restore();
+}
+
 function PhotoEditor({
   photo,
   drawing,
@@ -530,6 +621,8 @@ function PhotoEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorPhotoRef = useRef<HTMLDivElement>(null);
   const [brushSize, setBrushSize] = useState(4);
+  const [brushKind, setBrushKind] = useState<BrushKind>("pen");
+  const [brushColor, setBrushColor] = useState(DEFAULT_DRAWING_COLOR);
   const [tool, setTool] = useState<"draw" | "move">("draw");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -618,14 +711,8 @@ function PhotoEditor({
     const context = canvas.getContext("2d");
     if (!context) return;
     const point = pointFor(event.clientX, event.clientY);
-    context.strokeStyle = "#111111";
-    context.lineWidth = brushSize;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.beginPath();
-    context.moveTo(lastPoint.current.x, lastPoint.current.y);
-    context.lineTo(point.x, point.y);
-    context.stroke();
+    const pressure = event.pressure > 0 ? clamp(event.pressure, 0.2, 1) : 0.5;
+    drawBrushSegment(context, lastPoint.current, point, brushKind, brushColor, brushSize, pressure);
     lastPoint.current = point;
   };
 
@@ -719,6 +806,11 @@ function PhotoEditor({
     onDrawingChange("");
   };
 
+  const selectBrush = (kind: BrushKind) => {
+    setBrushKind(kind);
+    setTool("draw");
+  };
+
   return (
     <div className="editor-page">
       <div className="editor-polaroid" style={{ "--frame-color": frameColor } as CSSProperties}>
@@ -741,12 +833,24 @@ function PhotoEditor({
         </div>
       </div>
       <div className="editor-controls">
-        <div className="drawing-tools" aria-label="낙서 도구">
-          <button className={tool === "draw" ? "is-active" : ""} type="button" onClick={() => setTool("draw")} aria-label="펜" aria-pressed={tool === "draw"}><Pencil1Icon /></button>
-          <button className={tool === "move" ? "is-active" : ""} type="button" onClick={() => setTool("move")} aria-label="확대한 사진 이동" aria-pressed={tool === "move"} disabled={zoom <= 1}><MoveIcon /></button>
+        <div className="brush-tools" aria-label="브러시 종류">
+          <button className={tool === "draw" && brushKind === "pen" ? "is-active" : ""} type="button" onClick={() => selectBrush("pen")} aria-label="펜" aria-pressed={tool === "draw" && brushKind === "pen"}><Pencil1Icon /></button>
+          <button className={tool === "draw" && brushKind === "pencil" ? "is-active" : ""} type="button" onClick={() => selectBrush("pencil")} aria-label="연필" aria-pressed={tool === "draw" && brushKind === "pencil"}><Pencil2Icon /></button>
+          <button className={tool === "draw" && brushKind === "marker" ? "is-active" : ""} type="button" onClick={() => selectBrush("marker")} aria-label="형광펜" aria-pressed={tool === "draw" && brushKind === "marker"}><OpacityIcon /></button>
           <span className="tool-divider" />
+          <button className={tool === "move" ? "is-active" : ""} type="button" onClick={() => setTool("move")} aria-label="확대한 사진 이동" aria-pressed={tool === "move"} disabled={zoom <= 1}><MoveIcon /></button>
+        </div>
+        <div className="drawing-tools" aria-label="브러시 굵기와 편집">
           <button type="button" onClick={() => setBrushSize((size) => Math.max(2, size - 2))} aria-label="펜 가늘게"><MinusIcon /></button>
-          <span className="brush-preview" style={{ width: brushSize + 4, height: brushSize + 4 }} />
+          <span
+            className={`brush-preview is-${brushKind}`}
+            style={{
+              "--brush-color": brushColor,
+              "--brush-opacity": brushKind === "marker" ? 0.28 : brushKind === "pencil" ? 0.7 : 1,
+              width: brushKind === "marker" ? brushSize * 2 + 14 : brushSize + 6,
+              height: brushKind === "marker" ? 8 : brushSize + 6,
+            } as CSSProperties}
+          />
           <button type="button" onClick={() => setBrushSize((size) => Math.min(14, size + 2))} aria-label="펜 굵게"><PlusIcon /></button>
           <span className="tool-divider" />
           <button type="button" onClick={undo} aria-label="되돌리기"><ResetIcon /></button>
@@ -757,6 +861,24 @@ function PhotoEditor({
           <button className="zoom-readout" type="button" onClick={resetView} aria-label="확대 초기화">{Math.round(zoom * 100)}%</button>
           <button type="button" onClick={() => updateZoom(zoomRef.current + 0.25)} aria-label="확대" disabled={zoom >= 3}><ZoomInIcon /></button>
         </div>
+      </div>
+      <div className="drawing-colors color-controls" aria-label="펜 색상">
+        <Pencil1Icon aria-hidden="true" />
+        {DRAWING_COLORS.map((color) => (
+          <button
+            className="color-swatch"
+            type="button"
+            key={color}
+            style={{ "--swatch": color } as CSSProperties}
+            onClick={() => setBrushColor(color)}
+            aria-label={`펜 색상 ${color}`}
+            aria-pressed={brushColor.toLowerCase() === color}
+          />
+        ))}
+        <label className="color-custom" aria-label="사용자 지정 펜 색상">
+          <PlusIcon />
+          <input type="color" value={brushColor} onChange={(event) => setBrushColor(event.target.value)} />
+        </label>
       </div>
       <div className="frame-colors" aria-label="폴라로이드 프레임 색상">
         <ColorWheelIcon aria-hidden="true" />
