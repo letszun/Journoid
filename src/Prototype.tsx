@@ -87,7 +87,7 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.7.0";
+const APP_VERSION = "0.7.1";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const DEFAULT_PHOTO_ASPECT = 3 / 4;
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
@@ -204,11 +204,10 @@ async function persistTrips(trips: TripRecord[]) {
   }
 }
 
-function tripTitle(country: string | undefined, startDate: string, fallbackCity = "") {
-  const destination = country?.trim() || fallbackCity.trim();
-  if (!destination || !startDate) return "";
+function tripTitle(city: string, startDate: string) {
+  if (!city.trim() || !startDate) return "";
   const month = new Date(`${startDate}T12:00:00`).getMonth() + 1;
-  return `${month}월의 ${destination}`;
+  return `${month}월의 ${city.trim()}`;
 }
 
 function formatTripRange(startDate: string, endDate: string) {
@@ -534,7 +533,7 @@ function Home({
             <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
               <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
               <div className="journey-copy">
-                <strong>{tripTitle(trip.country, trip.startDate, trip.city)}</strong>
+                <strong>{tripTitle(trip.city, trip.startDate)}</strong>
                 <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
               </div>
               <TripPreview trip={trip} onPhotoAspect={(photoId, aspectRatio) => onUpdatePhotoAspect(trip.id, photoId, aspectRatio)} />
@@ -599,7 +598,7 @@ function TripForm({
   const [endDate, setEndDate] = useState(initialTrip?.endDate ?? "");
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const title = tripTitle(country, startDate, city);
+  const title = tripTitle(city, startDate);
 
   const save = () => {
     if (!country.trim() || !city.trim() || !startDate || !endDate) return setError("나라, 도시와 날짜를 모두 입력해 주세요.");

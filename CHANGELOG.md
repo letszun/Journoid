@@ -1,5 +1,10 @@
 # Journoid changelog
 
+## 0.7.1 — 2026-08-14
+
+- Changed both home-list and trip-form titles back to the `{month}월의 {city}` format.
+- Kept country names in trip input and beside the date range on the individual trip page.
+
 ## 0.7.0 — 2026-08-14
 
 - Made every 2D, preview, 3D, and doodle polaroid frame follow its source photo's aspect ratio.

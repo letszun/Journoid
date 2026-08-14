@@ -4,7 +4,7 @@
 
 - The visual direction is a quiet, whitespace-heavy, monochrome mobile photo journal with loose physical polaroids, restrained typography, and date-led photo groups.
 - The app must begin with an empty travel collection. Never hardcode a sample trip title such as `8월의 충칭` as the user's trip.
-- The user creates a trip by entering a country, city, and start/end dates. The app derives the home title in the form `{month}월의 {country}`, while the trip page keeps the city as its heading and places the country beside the date range.
+- The user creates a trip by entering a country, city, and start/end dates. Both the home list and the new/edit trip form derive their title in the form `{month}월의 {city}`. The trip page keeps the city as its heading and places the country beside the date range.
 - Imported photos should be selected in batches and grouped by captured date and time of day.
 - A 2D polaroid never shows capture time, placeholder copy, or comments on its frame. Saved comments appear below the polaroid in small dark gray text.
 - Tapping a 2D polaroid opens a full-screen white 3D model. Tapping the model opens photo doodling and short-comment editing.
