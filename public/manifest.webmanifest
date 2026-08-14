@@ -1,0 +1,18 @@
+{
+  "name": "journoid",
+  "short_name": "journoid",
+  "description": "여행 사진을 날짜와 시간대별 폴라로이드로 기록합니다.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,10 +1,7 @@
 import {
-  createContext,
-  type CSSProperties,
   type ChangeEvent,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -12,21 +9,15 @@ import {
 } from "react";
 import {
   ArrowLeftIcon,
+  CheckIcon,
   Cross1Icon,
   ImageIcon,
+  MinusIcon,
   Pencil1Icon,
   PlusIcon,
   ResetIcon,
+  TrashIcon,
 } from "@radix-ui/react-icons";
-import {
-  BottomSheet,
-  FlowStack,
-  KeyboardInput,
-  KeyboardTextarea,
-  MobileScroll,
-  type FlowControls,
-  type FlowScreen,
-} from "./mobile";
 
 type PhotoRecord = {
   id: string;
@@ -34,6 +25,7 @@ type PhotoRecord = {
   dataUrl: string;
   capturedAt: string;
   caption: string;
+  drawing?: string;
 };
 
 type TripRecord = {
@@ -45,98 +37,28 @@ type TripRecord = {
   photos: PhotoRecord[];
 };
 
-type TravelStoreValue = {
-  trips: TripRecord[];
-  activeTripId: string | null;
-  setActiveTripId: (id: string | null) => void;
-  addTrip: (city: string, startDate: string, endDate: string) => string;
-  appendPhotos: (tripId: string, photos: PhotoRecord[]) => void;
-  updatePhotoCaption: (tripId: string, photoId: string, caption: string) => void;
+type View =
+  | { name: "home" }
+  | { name: "new-trip" }
+  | { name: "trip"; tripId: string };
+
+type PhotoGroup = {
+  key: string;
+  dateLabel: string;
+  weekday: string;
+  periods: { label: string; photos: PhotoRecord[] }[];
 };
 
-const STORAGE_KEY = "journey-polaroid-trips-v1";
-const EMPTY_POLAROID_STACK = `${import.meta.env.BASE_URL}empty-polaroid-stack.png`;
-const TravelStoreContext = createContext<TravelStoreValue | null>(null);
-
-function useTravelStore() {
-  const store = useContext(TravelStoreContext);
-  if (!store) throw new Error("useTravelStore must be used inside TravelStore");
-  return store;
-}
+const STORAGE_KEY = "journoid-trips-v2";
+const LEGACY_STORAGE_KEY = "journey-polaroid-trips-v1";
 
 function readSavedTrips(): TripRecord[] {
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
+    const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     return saved ? (JSON.parse(saved) as TripRecord[]) : [];
   } catch {
     return [];
   }
-}
-
-function TravelStore({ children }: { children: ReactNode }) {
-  const [trips, setTrips] = useState<TripRecord[]>(readSavedTrips);
-  const [activeTripId, setActiveTripId] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
-    } catch {
-      // The prototype keeps working in memory if browser storage is full.
-    }
-  }, [trips]);
-
-  const value = useMemo<TravelStoreValue>(
-    () => ({
-      trips,
-      activeTripId,
-      setActiveTripId,
-      addTrip: (city, startDate, endDate) => {
-        const id = `trip-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const nextTrip: TripRecord = {
-          id,
-          city: city.trim(),
-          startDate,
-          endDate,
-          createdAt: new Date().toISOString(),
-          photos: [],
-        };
-        setTrips((current) => [nextTrip, ...current]);
-        setActiveTripId(id);
-        return id;
-      },
-      appendPhotos: (tripId, photos) => {
-        setTrips((current) =>
-          current.map((trip) =>
-            trip.id === tripId
-              ? {
-                  ...trip,
-                  photos: [...trip.photos, ...photos].sort(
-                    (a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
-                  ),
-                }
-              : trip,
-          ),
-        );
-      },
-      updatePhotoCaption: (tripId, photoId, caption) => {
-        setTrips((current) =>
-          current.map((trip) =>
-            trip.id === tripId
-              ? {
-                  ...trip,
-                  photos: trip.photos.map((photo) =>
-                    photo.id === photoId ? { ...photo, caption } : photo,
-                  ),
-                }
-              : trip,
-          ),
-        );
-      },
-    }),
-    [activeTripId, trips],
-  );
-
-  return <TravelStoreContext.Provider value={value}>{children}</TravelStoreContext.Provider>;
 }
 
 function tripTitle(city: string, startDate: string) {
@@ -146,344 +68,19 @@ function tripTitle(city: string, startDate: string) {
 }
 
 function formatTripRange(startDate: string, endDate: string) {
-  const start = new Date(`${startDate}T12:00:00`);
-  const end = new Date(`${endDate}T12:00:00`);
-  const startText = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(start);
-  const endText = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(end);
-  return `${startText} — ${endText}`;
+  const formatter = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" });
+  return `${formatter.format(new Date(`${startDate}T12:00:00`))} — ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
 }
-
-function tripScreen(): FlowScreen {
-  return {
-    id: "trip-detail",
-    headerHeight: 58,
-    header: (flow) => <TripHeader flow={flow} />,
-    render: () => <TripDetailScreen />,
-  };
-}
-
-function newTripScreen(): FlowScreen {
-  return {
-    id: "new-trip",
-    headerHeight: 58,
-    header: (flow) => <SimpleHeader title="새 여행" onBack={flow.pop} />,
-    render: (flow) => <NewTripScreen flow={flow} />,
-  };
-}
-
-function homeScreen(): FlowScreen {
-  return {
-    id: "home",
-    render: (flow) => <HomeScreen flow={flow} />,
-  };
-}
-
-function SimpleHeader({ title, onBack }: { title: string; onBack: () => void }) {
-  return (
-    <div className="app-header">
-      <button className="header-icon-button" type="button" onClick={onBack} aria-label="뒤로 가기">
-        <ArrowLeftIcon width="20" height="20" />
-      </button>
-      <strong>{title}</strong>
-      <span className="header-spacer" aria-hidden="true" />
-    </div>
-  );
-}
-
-function TripHeader({ flow }: { flow: FlowControls }) {
-  const { trips, activeTripId } = useTravelStore();
-  const trip = trips.find((item) => item.id === activeTripId);
-
-  return (
-    <div className="app-header trip-app-header">
-      <button className="header-icon-button" type="button" onClick={flow.pop} aria-label="여행 목록으로 돌아가기">
-        <ArrowLeftIcon width="20" height="20" />
-      </button>
-      <strong>{trip?.city ?? "여행"}</strong>
-      <span className="header-spacer" aria-hidden="true" />
-    </div>
-  );
-}
-
-function HomeScreen({ flow }: { flow: FlowControls }) {
-  const { trips, setActiveTripId } = useTravelStore();
-
-  const openTrip = (id: string) => {
-    setActiveTripId(id);
-    flow.push(tripScreen());
-  };
-
-  return (
-    <MobileScroll className="app-scroll">
-      <main className="home-screen">
-        <header className="home-topbar">
-          <span className="wordmark">jours.</span>
-          <button className="round-add-button" type="button" onClick={() => flow.push(newTripScreen())} aria-label="새 여행 추가">
-            <PlusIcon width="20" height="20" />
-          </button>
-        </header>
-
-        {trips.length === 0 ? (
-          <section className="empty-state" aria-labelledby="empty-title">
-            <img
-              className="empty-stack-image"
-              src={EMPTY_POLAROID_STACK}
-              alt="여행 풍경이 담긴 폴라로이드 사진 더미"
-              draggable={false}
-            />
-            <div className="empty-copy">
-              <p className="section-kicker">YOUR JOURNEYS</p>
-              <h1 id="empty-title">여행의 장면을<br />한곳에 모아보세요.</h1>
-              <p>도시와 날짜를 먼저 적고, 그 여행의 사진을 천천히 채워보세요.</p>
-            </div>
-            <button className="primary-button" type="button" onClick={() => flow.push(newTripScreen())}>
-              <PlusIcon width="17" height="17" />
-              첫 여행 추가
-            </button>
-          </section>
-        ) : (
-          <section className="trip-list" aria-labelledby="trip-list-title">
-            <div className="list-heading">
-              <div>
-                <p className="section-kicker">YOUR JOURNEYS</p>
-                <h1 id="trip-list-title">나의 여행</h1>
-              </div>
-              <span>{trips.length} TRIPS</span>
-            </div>
-            <div className="trip-cards">
-              {trips.map((trip) => (
-                <button className="trip-card" type="button" key={trip.id} onClick={() => openTrip(trip.id)}>
-                  <div className="trip-card-copy">
-                    <strong>{tripTitle(trip.city, trip.startDate)}</strong>
-                    <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
-                    <small>{trip.photos.length}장의 사진</small>
-                  </div>
-                  <TripCardPhotos trip={trip} />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-      </main>
-    </MobileScroll>
-  );
-}
-
-function TripCardPhotos({ trip }: { trip: TripRecord }) {
-  if (trip.photos.length === 0) {
-    return <div className="trip-card-empty"><ImageIcon width="21" height="21" /></div>;
-  }
-
-  return (
-    <div className="trip-card-photos" aria-hidden="true">
-      {trip.photos.slice(0, 3).map((photo) => (
-        <img key={photo.id} src={photo.dataUrl} alt="" draggable={false} />
-      ))}
-    </div>
-  );
-}
-
-function NewTripScreen({ flow }: { flow: FlowControls }) {
-  const { addTrip } = useTravelStore();
-  const [city, setCity] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [error, setError] = useState("");
-  const generatedTitle = tripTitle(city, startDate);
-
-  const saveTrip = () => {
-    if (!city.trim() || !startDate || !endDate) {
-      setError("도시와 여행 날짜를 모두 입력해 주세요.");
-      return;
-    }
-
-    if (endDate < startDate) {
-      setError("돌아오는 날짜가 출발 날짜보다 빠릅니다.");
-      return;
-    }
-
-    addTrip(city, startDate, endDate);
-    flow.replace(tripScreen());
-  };
-
-  return (
-    <MobileScroll className="app-scroll form-scroll">
-      <main className="new-trip-screen">
-        <p className="section-kicker">NEW JOURNEY</p>
-        <div className={`title-preview ${generatedTitle ? "is-ready" : ""}`}>
-          {generatedTitle || "도시와 날짜를 적으면\n여행 제목이 생겨요."}
-        </div>
-
-        <div className="trip-form">
-          <label className="field-label" htmlFor="trip-city">
-            <span>도시</span>
-            <KeyboardInput
-              id="trip-city"
-              value={city}
-              onChange={(event) => {
-                setCity(event.target.value);
-                setError("");
-              }}
-              placeholder="예: 충칭, 비엔나, 제주"
-              autoComplete="off"
-            />
-          </label>
-
-          <div className="date-fields">
-            <label className="field-label" htmlFor="trip-start">
-              <span>출발</span>
-              <input
-                id="trip-start"
-                type="date"
-                value={startDate}
-                onChange={(event) => {
-                  setStartDate(event.target.value);
-                  if (!endDate || endDate < event.target.value) setEndDate(event.target.value);
-                  setError("");
-                }}
-              />
-            </label>
-            <label className="field-label" htmlFor="trip-end">
-              <span>도착</span>
-              <input
-                id="trip-end"
-                type="date"
-                min={startDate || undefined}
-                value={endDate}
-                onChange={(event) => {
-                  setEndDate(event.target.value);
-                  setError("");
-                }}
-              />
-            </label>
-          </div>
-
-          <p className="form-help">제목은 시작 월과 도시를 조합해 자동으로 만들어집니다.</p>
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
-        </div>
-
-        <button className="primary-button form-submit" type="button" onClick={saveTrip}>
-          여행 만들기
-        </button>
-      </main>
-    </MobileScroll>
-  );
-}
-
-function TripDetailScreen() {
-  const { trips, activeTripId, appendPhotos, updatePhotoCaption } = useTravelStore();
-  const trip = trips.find((item) => item.id === activeTripId);
-  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState("");
-
-  if (!trip) {
-    return <MobileScroll className="app-scroll"><p className="missing-trip">여행을 찾을 수 없습니다.</p></MobileScroll>;
-  }
-
-  const selectedPhoto = trip.photos.find((photo) => photo.id === selectedPhotoId) ?? null;
-  const groups = groupPhotos(trip.photos);
-
-  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).filter((file) => file.type.startsWith("image/"));
-    event.target.value = "";
-    if (files.length === 0) return;
-
-    setUploading(true);
-    setUploadMessage("");
-    const imported = await Promise.all(files.slice(0, 24).map(toPhotoRecord));
-    appendPhotos(trip.id, imported);
-    setUploading(false);
-    setUploadMessage(`${imported.length}장을 촬영 시간순으로 정리했습니다.`);
-  };
-
-  return (
-    <>
-      <MobileScroll className="app-scroll detail-scroll">
-        <main className="trip-detail-screen">
-          <header className="trip-title-block">
-            <p className="section-kicker">TRAVEL ARCHIVE</p>
-            <h1>{tripTitle(trip.city, trip.startDate)}</h1>
-            <p>{formatTripRange(trip.startDate, trip.endDate)}</p>
-          </header>
-
-          <label className={`photo-import-button ${uploading ? "is-busy" : ""}`}>
-            <ImageIcon width="18" height="18" />
-            <span>{uploading ? "사진을 정리하는 중…" : "사진 불러오기"}</span>
-            <input type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} />
-          </label>
-          {uploadMessage ? <p className="upload-message" role="status">{uploadMessage}</p> : null}
-
-          {trip.photos.length === 0 ? (
-            <section className="photo-empty-state">
-              <img src={EMPTY_POLAROID_STACK} alt="겹쳐 놓은 여행 폴라로이드" draggable={false} />
-              <p>아직 사진이 없습니다.</p>
-              <span>갤러리에서 불러오면 날짜와 시간대별로 나눠드려요.</span>
-            </section>
-          ) : (
-            <div className="photo-timeline">
-              {groups.map((group) => (
-                <section className="date-group" key={group.key}>
-                  <header>
-                    <strong>{group.dateLabel}</strong>
-                    <span>·</span>
-                    <span>{group.weekday}</span>
-                  </header>
-                  {group.periods.map((period) => (
-                    <div className="time-group" key={`${group.key}-${period.label}`}>
-                      <p>{period.label}</p>
-                      <div className="polaroid-row">
-                        {period.photos.map((photo, index) => (
-                          <button
-                            className="mini-polaroid"
-                            type="button"
-                            key={photo.id}
-                            onClick={() => setSelectedPhotoId(photo.id)}
-                            style={{ "--photo-tilt": `${[-2.4, 1.1, -0.8, 2][index % 4]}deg` } as CSSProperties}
-                          >
-                            <img src={photo.dataUrl} alt={photo.caption || `${formatPhotoTime(photo.capturedAt)}에 촬영한 사진`} draggable={false} />
-                            <span>{formatPhotoTime(photo.capturedAt)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </section>
-              ))}
-            </div>
-          )}
-        </main>
-      </MobileScroll>
-
-      <PhotoViewer
-        photo={selectedPhoto}
-        open={Boolean(selectedPhoto)}
-        onClose={() => setSelectedPhotoId(null)}
-        onSave={(caption) => {
-          if (!selectedPhoto) return;
-          updatePhotoCaption(trip.id, selectedPhoto.id, caption);
-          setSelectedPhotoId(null);
-        }}
-      />
-    </>
-  );
-}
-
-type PhotoGroup = {
-  key: string;
-  dateLabel: string;
-  weekday: string;
-  periods: { label: string; photos: PhotoRecord[] }[];
-};
 
 function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
   const byDate = new Map<string, PhotoRecord[]>();
-
-  photos.forEach((photo) => {
-    const date = new Date(photo.capturedAt);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    byDate.set(key, [...(byDate.get(key) ?? []), photo]);
-  });
+  [...photos]
+    .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime())
+    .forEach((photo) => {
+      const date = new Date(photo.capturedAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      byDate.set(key, [...(byDate.get(key) ?? []), photo]);
+    });
 
   return Array.from(byDate.entries()).map(([key, dayPhotos]) => {
     const date = new Date(`${key}T12:00:00`);
@@ -497,124 +94,456 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
     return {
       key,
       dateLabel: new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" }).format(date),
-      weekday: new Intl.DateTimeFormat("ko-KR", { weekday: "long" }).format(date),
+      weekday: new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date),
       periods: Array.from(periodMap.entries()).map(([label, periodPhotos]) => ({ label, photos: periodPhotos })),
     };
   });
 }
 
-function formatPhotoTime(capturedAt: string) {
-  return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
-    new Date(capturedAt),
+export default function Prototype() {
+  const [trips, setTrips] = useState<TripRecord[]>(readSavedTrips);
+  const [view, setView] = useState<View>({ name: "home" });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
+    } catch {
+      // Keep the current session usable if browser storage is full.
+    }
+  }, [trips]);
+
+  const addTrip = (city: string, startDate: string, endDate: string) => {
+    const id = `trip-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
+    const trip: TripRecord = {
+      id,
+      city: city.trim(),
+      startDate,
+      endDate,
+      createdAt: new Date().toISOString(),
+      photos: [],
+    };
+    setTrips((current) => [trip, ...current]);
+    setView({ name: "trip", tripId: id });
+  };
+
+  const appendPhotos = (tripId: string, photos: PhotoRecord[]) => {
+    setTrips((current) => current.map((trip) => (
+      trip.id === tripId ? { ...trip, photos: [...trip.photos, ...photos] } : trip
+    )));
+  };
+
+  const updatePhoto = (tripId: string, photoId: string, next: Pick<PhotoRecord, "caption" | "drawing">) => {
+    setTrips((current) => current.map((trip) => (
+      trip.id === tripId
+        ? { ...trip, photos: trip.photos.map((photo) => photo.id === photoId ? { ...photo, ...next } : photo) }
+        : trip
+    )));
+  };
+
+  return (
+    <div className="app-shell">
+      {view.name === "home" ? (
+        <Home trips={trips} onAdd={() => setView({ name: "new-trip" })} onOpen={(tripId) => setView({ name: "trip", tripId })} />
+      ) : null}
+      {view.name === "new-trip" ? <NewTrip onBack={() => setView({ name: "home" })} onSave={addTrip} /> : null}
+      {view.name === "trip" ? (
+        <TripDetail
+          trip={trips.find((trip) => trip.id === view.tripId)}
+          onBack={() => setView({ name: "home" })}
+          onAddPhotos={(photos) => appendPhotos(view.tripId, photos)}
+          onUpdatePhoto={(photoId, next) => updatePhoto(view.tripId, photoId, next)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function Home({ trips, onAdd, onOpen }: { trips: TripRecord[]; onAdd: () => void; onOpen: (tripId: string) => void }) {
+  return (
+    <main className="screen home-screen">
+      <header className="topbar">
+        <span className="wordmark">journoid</span>
+        <button className="icon-button" type="button" onClick={onAdd} aria-label="새 여행 추가"><PlusIcon /></button>
+      </header>
+
+      {trips.length === 0 ? (
+        <section className="home-empty">
+          <span>아직 여행이 없습니다.</span>
+          <button className="text-action" type="button" onClick={onAdd}>첫 여행 추가</button>
+        </section>
+      ) : (
+        <section className="journey-list" aria-label="여행 목록">
+          {trips.map((trip, index) => (
+            <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
+              <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
+              <div className="journey-copy">
+                <strong>{tripTitle(trip.city, trip.startDate)}</strong>
+                <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+              </div>
+              <TripPreview trip={trip} />
+            </button>
+          ))}
+        </section>
+      )}
+    </main>
+  );
+}
+
+function TripPreview({ trip }: { trip: TripRecord }) {
+  if (trip.photos.length === 0) return <span className="journey-photo-count">0</span>;
+  return (
+    <span className="preview-stack" aria-label={`${trip.photos.length}장의 사진`}>
+      {trip.photos.slice(-2).map((photo, index) => (
+        <span className="preview-polaroid" key={photo.id} style={{ "--preview-index": index } as CSSProperties}>
+          <img src={photo.dataUrl} alt="" />
+          {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="" /> : null}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function NewTrip({ onBack, onSave }: { onBack: () => void; onSave: (city: string, startDate: string, endDate: string) => void }) {
+  const [city, setCity] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [error, setError] = useState("");
+  const title = tripTitle(city, startDate);
+
+  const save = () => {
+    if (!city.trim() || !startDate || !endDate) return setError("도시와 날짜를 모두 입력해 주세요.");
+    if (endDate < startDate) return setError("여행 종료일을 확인해 주세요.");
+    onSave(city, startDate, endDate);
+  };
+
+  return (
+    <main className="screen form-screen">
+      <header className="topbar">
+        <button className="icon-button" type="button" onClick={onBack} aria-label="뒤로"><ArrowLeftIcon /></button>
+        <button className="icon-button" type="button" onClick={save} aria-label="저장"><CheckIcon /></button>
+      </header>
+      <section className="trip-form">
+        <h1>{title || "새 여행"}</h1>
+        <label>
+          <span>도시</span>
+          <input value={city} onChange={(event) => { setCity(event.target.value); setError(""); }} placeholder="도시 이름" autoFocus />
+        </label>
+        <div className="date-grid">
+          <label>
+            <span>시작</span>
+            <input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setEndDate((current) => current && current >= event.target.value ? current : event.target.value); setError(""); }} />
+          </label>
+          <label>
+            <span>종료</span>
+            <input type="date" min={startDate || undefined} value={endDate} onChange={(event) => { setEndDate(event.target.value); setError(""); }} />
+          </label>
+        </div>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+      </section>
+    </main>
+  );
+}
+
+function TripDetail({
+  trip,
+  onBack,
+  onAddPhotos,
+  onUpdatePhoto,
+}: {
+  trip?: TripRecord;
+  onBack: () => void;
+  onAddPhotos: (photos: PhotoRecord[]) => void;
+  onUpdatePhoto: (photoId: string, next: Pick<PhotoRecord, "caption" | "drawing">) => void;
+}) {
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const selectedPhoto = trip?.photos.find((photo) => photo.id === selectedPhotoId) ?? null;
+  const groups = useMemo(() => groupPhotos(trip?.photos ?? []), [trip?.photos]);
+
+  if (!trip) return null;
+
+  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []).filter((file) => file.type.startsWith("image/"));
+    event.target.value = "";
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      onAddPhotos(await Promise.all(files.map(toPhotoRecord)));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <>
+      <main className="screen trip-screen">
+        <header className="topbar sticky-topbar">
+          <button className="icon-button" type="button" onClick={onBack} aria-label="여행 목록"><ArrowLeftIcon /></button>
+          <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
+            <ImageIcon />
+            <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
+          </label>
+        </header>
+        <section className="trip-heading">
+          <h1>{tripTitle(trip.city, trip.startDate)}</h1>
+          <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+        </section>
+
+        {trip.photos.length === 0 ? (
+          <button className="photo-empty" type="button" onClick={() => fileInput.current?.click()} disabled={uploading}>
+            <PlusIcon />
+            <span>{uploading ? "불러오는 중" : "사진 추가"}</span>
+          </button>
+        ) : (
+          <div className="timeline">
+            {groups.map((group) => (
+              <section className="date-section" key={group.key}>
+                <header><strong>{group.dateLabel}</strong><span>{group.weekday}</span></header>
+                {group.periods.map((period) => (
+                  <div className="period" key={`${group.key}-${period.label}`}>
+                    <span className="period-label">{period.label}</span>
+                    <div className="polaroid-grid">
+                      {period.photos.map((photo, index) => (
+                        <article className="polaroid-entry" key={photo.id}>
+                          <button
+                            className="flat-polaroid"
+                            type="button"
+                            style={{ "--tilt": `${[-2.1, 1.25, -0.65, 2.4][index % 4]}deg` } as CSSProperties}
+                            onClick={() => setSelectedPhotoId(photo.id)}
+                            aria-label="폴라로이드 열기"
+                          >
+                            <span className="flat-photo">
+                              <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} />
+                              {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="사진 위 낙서" /> : null}
+                            </span>
+                          </button>
+                          {photo.caption ? <p className="photo-comment">{photo.caption}</p> : null}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {selectedPhoto ? (
+        <PhotoViewer
+          photo={selectedPhoto}
+          onClose={() => setSelectedPhotoId(null)}
+          onSave={(next) => onUpdatePhoto(selectedPhoto.id, next)}
+        />
+      ) : null}
+    </>
   );
 }
 
 function PhotoViewer({
   photo,
-  open,
   onClose,
   onSave,
 }: {
-  photo: PhotoRecord | null;
-  open: boolean;
+  photo: PhotoRecord;
   onClose: () => void;
-  onSave: (caption: string) => void;
+  onSave: (next: Pick<PhotoRecord, "caption" | "drawing">) => void;
 }) {
-  const [rotation, setRotation] = useState({ x: -5, y: -14 });
-  const [caption, setCaption] = useState("");
-  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const [mode, setMode] = useState<"model" | "edit">("model");
+  const [rotation, setRotation] = useState({ x: -5, y: -16 });
+  const [caption, setCaption] = useState(photo.caption);
+  const [drawing, setDrawing] = useState(photo.drawing ?? "");
+  const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
 
   useEffect(() => {
-    if (!photo) return;
-    setCaption(photo.caption);
-    setRotation({ x: -5, y: -14 });
-  }, [photo]);
+    document.body.classList.add("viewer-open");
+    return () => document.body.classList.remove("viewer-open");
+  }, []);
 
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const pointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, distance: 0 };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const deltaX = event.clientX - drag.x;
-    const deltaY = event.clientY - drag.y;
-    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    setRotation((current) => ({
-      x: Math.max(-70, Math.min(70, current.x - deltaY * 0.35)),
-      y: current.y + deltaX * 0.42,
-    }));
+  const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = drag.current;
+    if (!current || current.id !== event.pointerId) return;
+    const deltaX = event.clientX - current.x;
+    const deltaY = event.clientY - current.y;
+    drag.current = { id: current.id, x: event.clientX, y: event.clientY, distance: current.distance + Math.abs(deltaX) + Math.abs(deltaY) };
+    setRotation((value) => ({ x: Math.max(-68, Math.min(68, value.x - deltaY * 0.32)), y: value.y + deltaX * 0.4 }));
   };
 
-  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  const pointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drag.current?.id !== event.pointerId) return;
+    const wasTap = drag.current.distance < 9;
+    drag.current = null;
+    if (wasTap) setMode("edit");
+  };
+
+  const save = () => {
+    onSave({ caption: caption.trim(), drawing: drawing || undefined });
+    setMode("model");
   };
 
   return (
-    <BottomSheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()} title="폴라로이드" description={photo ? `${formatPhotoTime(photo.capturedAt)} 촬영` : undefined} snap={0.92}>
-      {photo ? (
-        <div className="photo-viewer-content">
-          <button className="sheet-close" type="button" onClick={onClose} aria-label="사진 닫기">
-            <Cross1Icon width="16" height="16" />
-          </button>
-          <div
-            className="polaroid-stage"
-            onPointerDown={startDrag}
-            onPointerMove={moveDrag}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-          >
-            <div
-              className="polaroid-model"
-              style={{ transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)` }}
-              aria-label="드래그해서 돌려볼 수 있는 폴라로이드"
-            >
-              <div className="model-face model-front">
-                <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} draggable={false} />
-                <p>{caption || "한 줄을 남겨보세요."}</p>
-                <span>{formatPhotoTime(photo.capturedAt)}</span>
-              </div>
-              <div className="model-face model-back">
-                <strong>JOURNEY NOTE</strong>
-                <small>{new Date(photo.capturedAt).toLocaleDateString("ko-KR")}</small>
-                <p>{caption || "이 사진의 기억은 아직 비어 있습니다."}</p>
-              </div>
-              <span className="model-edge edge-right" aria-hidden="true" />
-              <span className="model-edge edge-bottom" aria-hidden="true" />
+    <div className={`fullscreen-viewer ${mode === "edit" ? "is-editing" : ""}`} role="dialog" aria-modal="true" aria-label="폴라로이드 상세">
+      <header className="viewer-header">
+        <button className="icon-button" type="button" onClick={mode === "edit" ? () => setMode("model") : onClose} aria-label={mode === "edit" ? "모델로 돌아가기" : "닫기"}>
+          {mode === "edit" ? <ArrowLeftIcon /> : <Cross1Icon />}
+        </button>
+        {mode === "edit" ? <button className="save-text-button" type="button" onClick={save}>저장</button> : null}
+      </header>
+
+      {mode === "model" ? (
+        <div className="model-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }}>
+          <div className="polaroid-model" style={{ transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)` }}>
+            <div className="model-face model-front">
+              <ModelPhoto photo={photo} drawing={drawing} />
             </div>
+            <div className="model-face model-back" />
+            <span className="model-edge edge-right" />
+            <span className="model-edge edge-bottom" />
           </div>
-          <button className="reset-model" type="button" onClick={() => setRotation({ x: -5, y: -14 })}>
-            <ResetIcon width="14" height="14" /> 제자리
-          </button>
-          <label className="caption-field" htmlFor="photo-caption">
-            <span><Pencil1Icon width="14" height="14" /> 사진 코멘트</span>
-            <KeyboardTextarea
-              id="photo-caption"
-              value={caption}
-              onChange={(event) => setCaption(event.target.value.slice(0, 80))}
-              placeholder="한두 줄로 이 순간을 적어보세요."
-              rows={2}
-            />
-            <small>{caption.length}/80</small>
-          </label>
-          <button className="primary-button viewer-save" type="button" onClick={() => onSave(caption.trim())}>
-            코멘트 저장
-          </button>
         </div>
-      ) : null}
-    </BottomSheet>
+      ) : (
+        <PhotoEditor photo={photo} drawing={drawing} onDrawingChange={setDrawing} caption={caption} onCaptionChange={setCaption} />
+      )}
+    </div>
+  );
+}
+
+function ModelPhoto({ photo, drawing }: { photo: PhotoRecord; drawing: string }) {
+  return (
+    <div className="model-photo">
+      <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} />
+      {drawing ? <img className="drawing-layer" src={drawing} alt="사진 위 낙서" /> : null}
+    </div>
+  );
+}
+
+function PhotoEditor({
+  photo,
+  drawing,
+  onDrawingChange,
+  caption,
+  onCaptionChange,
+}: {
+  photo: PhotoRecord;
+  drawing: string;
+  onDrawingChange: (value: string) => void;
+  caption: string;
+  onCaptionChange: (value: string) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [brushSize, setBrushSize] = useState(4);
+  const drawingRef = useRef(false);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  const history = useRef<string[]>([]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!drawing) return;
+    const image = new Image();
+    image.onload = () => context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.src = drawing;
+  }, [drawing]);
+
+  const pointFor = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * (event.currentTarget.width / rect.width),
+      y: (event.clientY - rect.top) * (event.currentTarget.height / rect.height),
+    };
+  };
+
+  const start = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    history.current.push(canvasRef.current?.toDataURL() ?? "");
+    drawingRef.current = true;
+    lastPoint.current = pointFor(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const move = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current || !lastPoint.current) return;
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const point = pointFor(event);
+    context.strokeStyle = "#111111";
+    context.lineWidth = brushSize;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(lastPoint.current.x, lastPoint.current.y);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    lastPoint.current = point;
+  };
+
+  const end = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    lastPoint.current = null;
+    onDrawingChange(canvasRef.current?.toDataURL("image/png") ?? "");
+  };
+
+  const undo = () => {
+    const previous = history.current.pop();
+    if (previous !== undefined) onDrawingChange(previous);
+  };
+
+  const clear = () => {
+    history.current.push(canvasRef.current?.toDataURL() ?? "");
+    onDrawingChange("");
+  };
+
+  return (
+    <div className="editor-page">
+      <div className="editor-polaroid">
+        <div className="editor-photo">
+          <img src={photo.dataUrl} alt="편집할 여행 사진" />
+          <canvas
+            ref={canvasRef}
+            width="1000"
+            height="1000"
+            onPointerDown={start}
+            onPointerMove={move}
+            onPointerUp={end}
+            onPointerCancel={end}
+            aria-label="사진 위에 낙서하기"
+          />
+        </div>
+      </div>
+      <div className="drawing-tools" aria-label="낙서 도구">
+        <button type="button" onClick={() => setBrushSize((size) => Math.max(2, size - 2))} aria-label="펜 가늘게"><MinusIcon /></button>
+        <span className="brush-preview" style={{ width: brushSize + 4, height: brushSize + 4 }} />
+        <button type="button" onClick={() => setBrushSize((size) => Math.min(14, size + 2))} aria-label="펜 굵게"><PlusIcon /></button>
+        <span className="tool-divider" />
+        <button type="button" onClick={undo} aria-label="되돌리기"><ResetIcon /></button>
+        <button type="button" onClick={clear} aria-label="낙서 지우기"><TrashIcon /></button>
+      </div>
+      <label className="comment-editor">
+        <Pencil1Icon />
+        <textarea value={caption} maxLength={80} rows={2} onChange={(event) => onCaptionChange(event.target.value)} placeholder="코멘트" />
+      </label>
+    </div>
   );
 }
 
 async function toPhotoRecord(file: File): Promise<PhotoRecord> {
   const capturedAt = (await readExifDate(file)) ?? new Date(file.lastModified || Date.now());
-  const dataUrl = await resizeImage(file);
   return {
-    id: `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: `photo-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`,
     name: file.name,
-    dataUrl,
+    dataUrl: await resizeImage(file),
     capturedAt: capturedAt.toISOString(),
     caption: "",
   };
@@ -623,7 +552,7 @@ async function toPhotoRecord(file: File): Promise<PhotoRecord> {
 async function resizeImage(file: File): Promise<string> {
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    const maxSide = 1100;
+    const maxSide = 900;
     const ratio = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
@@ -632,7 +561,7 @@ async function resizeImage(file: File): Promise<string> {
     if (!context) throw new Error("Canvas unavailable");
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    return canvas.toDataURL("image/jpeg", 0.82);
+    return canvas.toDataURL("image/jpeg", 0.76);
   } catch {
     return fileToDataUrl(file);
   }
@@ -649,12 +578,10 @@ function fileToDataUrl(file: File) {
 
 async function readExifDate(file: File): Promise<Date | null> {
   if (!/jpe?g/i.test(file.type) && !/\.jpe?g$/i.test(file.name)) return null;
-
   try {
     const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
     const view = new DataView(buffer);
     if (view.byteLength < 4 || view.getUint16(0, false) !== 0xffd8) return null;
-
     let offset = 2;
     while (offset + 4 < view.byteLength) {
       const marker = view.getUint16(offset, false);
@@ -662,15 +589,9 @@ async function readExifDate(file: File): Promise<Date | null> {
       if ((marker & 0xff00) !== 0xff00) break;
       const segmentLength = view.getUint16(offset, false);
       if (segmentLength < 2 || offset + segmentLength > view.byteLength) break;
-
       if (marker === 0xffe1 && segmentLength >= 10) {
         const payload = offset + 2;
-        if (
-          view.getUint8(payload) === 0x45 &&
-          view.getUint8(payload + 1) === 0x78 &&
-          view.getUint8(payload + 2) === 0x69 &&
-          view.getUint8(payload + 3) === 0x66
-        ) {
+        if (view.getUint8(payload) === 0x45 && view.getUint8(payload + 1) === 0x78 && view.getUint8(payload + 2) === 0x69 && view.getUint8(payload + 3) === 0x66) {
           return parseExifTiff(view, payload + 6);
         }
       }
@@ -679,7 +600,6 @@ async function readExifDate(file: File): Promise<Date | null> {
   } catch {
     return null;
   }
-
   return null;
 }
 
@@ -688,11 +608,9 @@ function parseExifTiff(view: DataView, tiffStart: number): Date | null {
   const endianMark = view.getUint16(tiffStart, false);
   const little = endianMark === 0x4949;
   if (!little && endianMark !== 0x4d4d) return null;
-
   const uint16 = (offset: number) => view.getUint16(offset, little);
   const uint32 = (offset: number) => view.getUint32(offset, little);
   const firstIfd = tiffStart + uint32(tiffStart + 4);
-
   const readAscii = (entryOffset: number, count: number) => {
     const start = count <= 4 ? entryOffset + 8 : tiffStart + uint32(entryOffset + 8);
     if (start < 0 || start + count > view.byteLength) return "";
@@ -704,7 +622,6 @@ function parseExifTiff(view: DataView, tiffStart: number): Date | null {
     }
     return value;
   };
-
   const parseIfd = (ifdOffset: number, wantedTags: number[]) => {
     if (ifdOffset < 0 || ifdOffset + 2 > view.byteLength) return new Map<number, { value: number; text: string }>();
     const count = Math.min(uint16(ifdOffset), 256);
@@ -714,33 +631,17 @@ function parseExifTiff(view: DataView, tiffStart: number): Date | null {
       if (entry + 12 > view.byteLength) break;
       const tag = uint16(entry);
       if (!wantedTags.includes(tag)) continue;
-      const type = uint16(entry + 2);
-      const itemCount = uint32(entry + 4);
-      result.set(tag, {
-        value: uint32(entry + 8),
-        text: type === 2 ? readAscii(entry, itemCount) : "",
-      });
+      result.set(tag, { value: uint32(entry + 8), text: uint16(entry + 2) === 2 ? readAscii(entry, uint32(entry + 4)) : "" });
     }
     return result;
   };
-
   const root = parseIfd(firstIfd, [0x0132, 0x8769]);
   const exifPointer = root.get(0x8769)?.value;
   const exif = exifPointer ? parseIfd(tiffStart + exifPointer, [0x9003, 0x9004]) : new Map();
   const raw = exif.get(0x9003)?.text || exif.get(0x9004)?.text || root.get(0x0132)?.text;
-  if (!raw) return null;
-
-  const match = raw.match(/(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  const match = raw?.match(/(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
   if (!match) return null;
   const [, year, month, day, hour, minute, second] = match;
   const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-export default function Prototype() {
-  return (
-    <TravelStore>
-      <FlowStack initial={homeScreen()} />
-    </TravelStore>
-  );
 }
