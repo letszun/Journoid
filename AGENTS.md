@@ -4,14 +4,14 @@
 
 - The visual direction is a quiet, whitespace-heavy, monochrome mobile photo journal with loose physical polaroids, restrained typography, and date-led photo groups.
 - The app must begin with an empty travel collection. Never hardcode a sample trip title such as `8월의 충칭` as the user's trip.
-- The user creates a trip by entering a city and start/end dates. The app derives the display title from that input in the form `{month}월의 {city}`.
+- The user creates a trip by entering a country, city, and start/end dates. The app derives the home title in the form `{month}월의 {country}`, while the trip page keeps the city as its heading and places the country beside the date range.
 - Imported photos should be selected in batches and grouped by captured date and time of day.
 - A 2D polaroid never shows capture time, placeholder copy, or comments on its frame. Saved comments appear below the polaroid in small dark gray text.
 - Tapping a 2D polaroid opens a full-screen white 3D model. Tapping the model opens photo doodling and short-comment editing.
 - Use only Helvetica/Pretendard-style sans-serif typography and a neutral black, white, and gray palette. Do not use orange accent colors or decorative serif fonts.
 - Do not display the provided reference image or other copied reference imagery in the product.
 - The current visual language is monochrome editorial: oversized numerals and Korean display type, deconstructed alignment, hard rules, square controls, and staggered photo grids. Avoid generic rounded cards and soft lifestyle-app styling.
-- Photo windows use the iPhone camera's default portrait orientation, `3:4`, across list, preview, 3D model, and doodle editor surfaces.
+- Photo windows and their surrounding polaroid frames follow each source image's aspect ratio across home previews, the 2D gallery, the 3D model, and the doodle editor. Persist detected ratios per photo and lazily backfill older saved photos without requiring re-import.
 - Batch imports must stay responsive beyond five files: process at most two images concurrently, append completed batches immediately, encode asynchronously, yield between batches, and debounce persistent serialization.
 - The gallery is photo-first and grid-aligned: use a 4px base unit, 16px mobile gutters, 40px primary controls, 18px line icons, and 1px neutral rules. Do not use drop shadows, random rotations, staggered rows, or oversized date typography around the polaroids.
 - Use deliberate Helvetica/Pretendard typography: display tracking around `-0.055em`, body tracking around `-0.012em`, compact display leading around `0.94`, and readable body leading around `1.45–1.5`. Align labels, counts, and titles to shared left and baseline anchors.
@@ -25,6 +25,7 @@
 - Keep trip galleries airy and compact: use three small 2D polaroids per mobile row, four on wider screens, a thin 4px frame inset, at least 12px horizontal separation, and 32px row spacing.
 - Home journey rows use restrained 20–30px titles and compact 52px photo previews; they should read as an index rather than a second gallery.
 - Inside a trip, show the city without a redundant `{month}월의` eyebrow. Date group headers show only the zero-padded day and weekday, never the month already present in the trip range.
+- Trip country, city, start date, and end date remain editable from the trip's three-dot menu without replacing its photos or other saved content.
 - Group photos in this display order and at these exact boundaries: 아침 05:00–11:29, 점심 11:30–14:29, 오후 14:30–17:29, 저녁 17:30–21:29, 밤 21:30–01:59, 새벽 02:00–04:59.
 - Put the current semantic `APP_VERSION` inside the three-dot settings menu instead of displaying it in headers. Increment it for each published update and record user-visible changes in `CHANGELOG.md` so a home-screen installation can be checked against the latest deployment.
 - Offer a persistent monochrome dark theme from the three-dot settings menu and store the preference at the stable `journoid.theme` local-storage key.

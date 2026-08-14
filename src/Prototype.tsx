@@ -34,22 +34,32 @@ type PhotoRecord = {
   caption: string;
   drawing?: string;
   frameColor?: string;
+  aspectRatio?: number;
 };
 
-type PhotoUpdate = Pick<PhotoRecord, "caption" | "drawing" | "frameColor">;
+type PhotoUpdate = Partial<Pick<PhotoRecord, "caption" | "drawing" | "frameColor" | "aspectRatio">>;
 
 type TripRecord = {
   id: string;
   city: string;
+  country?: string;
   startDate: string;
   endDate: string;
   createdAt: string;
   photos: PhotoRecord[];
 };
 
+type TripDetails = {
+  city: string;
+  country: string;
+  startDate: string;
+  endDate: string;
+};
+
 type View =
   | { name: "home" }
   | { name: "new-trip" }
+  | { name: "edit-trip"; tripId: string }
   | { name: "trip"; tripId: string };
 
 type PhotoPeriod = "아침" | "점심" | "오후" | "저녁" | "밤" | "새벽";
@@ -77,8 +87,9 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.7.0";
 const DEFAULT_FRAME_COLOR = "#ffffff";
+const DEFAULT_PHOTO_ASPECT = 3 / 4;
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 const DEFAULT_DRAWING_COLOR = "#111111";
 const DRAWING_COLORS = ["#111111", "#ffffff", "#ff453a", "#0a84ff", "#ffd60a"];
@@ -193,15 +204,44 @@ async function persistTrips(trips: TripRecord[]) {
   }
 }
 
-function tripTitle(city: string, startDate: string) {
-  if (!city.trim() || !startDate) return "";
+function tripTitle(country: string | undefined, startDate: string, fallbackCity = "") {
+  const destination = country?.trim() || fallbackCity.trim();
+  if (!destination || !startDate) return "";
   const month = new Date(`${startDate}T12:00:00`).getMonth() + 1;
-  return `${month}월의 ${city.trim()}`;
+  return `${month}월의 ${destination}`;
 }
 
 function formatTripRange(startDate: string, endDate: string) {
   const formatter = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" });
   return `${formatter.format(new Date(`${startDate}T12:00:00`))} — ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
+}
+
+function validPhotoAspect(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.max(0.45, Math.min(2.4, value))
+    : DEFAULT_PHOTO_ASPECT;
+}
+
+function polaroidFrameAspect(photoAspect: number) {
+  return 1 / ((0.916 / validPhotoAspect(photoAspect)) + 0.217);
+}
+
+function photoFrameStyle(photo: Pick<PhotoRecord, "aspectRatio">, extra: CSSProperties = {}) {
+  const aspectRatio = validPhotoAspect(photo.aspectRatio);
+  return {
+    ...extra,
+    "--photo-aspect": aspectRatio,
+    "--frame-aspect": polaroidFrameAspect(aspectRatio),
+  } as CSSProperties;
+}
+
+function renderedImageAspect(image: HTMLImageElement) {
+  if (!image.naturalWidth || !image.naturalHeight) return null;
+  return validPhotoAspect(image.naturalWidth / image.naturalHeight);
+}
+
+function isDifferentAspect(current: number | undefined, next: number) {
+  return !current || Math.abs(validPhotoAspect(current) - next) > 0.001;
 }
 
 function photoPeriod(date: Date): PhotoPeriod {
@@ -266,10 +306,12 @@ function SettingsMenu({
   onClose,
   theme,
   onToggleTheme,
+  onEditTrip,
   onDeletePhoto,
 }: ThemeProps & {
   open: boolean;
   onClose: () => void;
+  onEditTrip?: () => void;
   onDeletePhoto?: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -301,6 +343,11 @@ function SettingsMenu({
           </div>
         ) : (
           <>
+            {onEditTrip ? (
+              <button className="settings-row" type="button" onClick={() => { onClose(); onEditTrip(); }}>
+                <span>여행 정보 수정</span>
+              </button>
+            ) : null}
             <button className="settings-row" type="button" onClick={onToggleTheme}>
               <span>다크 테마</span>
               <b>{theme === "dark" ? "켜짐" : "꺼짐"}</b>
@@ -357,11 +404,12 @@ export default function Prototype() {
     return () => window.clearTimeout(saveTimer);
   }, [storageReady, trips]);
 
-  const addTrip = (city: string, startDate: string, endDate: string) => {
+  const addTrip = ({ city, country, startDate, endDate }: TripDetails) => {
     const id = `trip-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
     const trip: TripRecord = {
       id,
       city: city.trim(),
+      country: country.trim(),
       startDate,
       endDate,
       createdAt: new Date().toISOString(),
@@ -369,6 +417,14 @@ export default function Prototype() {
     };
     setTrips((current) => [trip, ...current]);
     setView({ name: "trip", tripId: id });
+  };
+
+  const updateTrip = (tripId: string, next: TripDetails) => {
+    setTrips((current) => current.map((trip) => (
+      trip.id === tripId
+        ? { ...trip, city: next.city.trim(), country: next.country.trim(), startDate: next.startDate, endDate: next.endDate }
+        : trip
+    )));
   };
 
   const appendPhotos = (tripId: string, photos: PhotoRecord[]) => {
@@ -404,17 +460,31 @@ export default function Prototype() {
           trips={trips}
           onAdd={() => setView({ name: "new-trip" })}
           onOpen={(tripId) => setView({ name: "trip", tripId })}
+          onUpdatePhotoAspect={(tripId, photoId, aspectRatio) => updatePhoto(tripId, photoId, { aspectRatio })}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
       ) : null}
       {view.name === "new-trip" ? (
-        <NewTrip onBack={() => setView({ name: "home" })} onSave={addTrip} theme={theme} onToggleTheme={toggleTheme} />
+        <TripForm onBack={() => setView({ name: "home" })} onSave={addTrip} theme={theme} onToggleTheme={toggleTheme} />
+      ) : null}
+      {view.name === "edit-trip" ? (
+        <TripForm
+          initialTrip={trips.find((trip) => trip.id === view.tripId)}
+          onBack={() => setView({ name: "trip", tripId: view.tripId })}
+          onSave={(next) => {
+            updateTrip(view.tripId, next);
+            setView({ name: "trip", tripId: view.tripId });
+          }}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
       ) : null}
       {view.name === "trip" ? (
         <TripDetail
           trip={trips.find((trip) => trip.id === view.tripId)}
           onBack={() => setView({ name: "home" })}
+          onEdit={() => setView({ name: "edit-trip", tripId: view.tripId })}
           onAddPhotos={(photos) => appendPhotos(view.tripId, photos)}
           onUpdatePhoto={(photoId, next) => updatePhoto(view.tripId, photoId, next)}
           onDeletePhoto={(photoId) => deletePhoto(view.tripId, photoId)}
@@ -430,12 +500,14 @@ function Home({
   trips,
   onAdd,
   onOpen,
+  onUpdatePhotoAspect,
   theme,
   onToggleTheme,
 }: {
   trips: TripRecord[];
   onAdd: () => void;
   onOpen: (tripId: string) => void;
+  onUpdatePhotoAspect: (tripId: string, photoId: string, aspectRatio: number) => void;
 } & ThemeProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -462,10 +534,10 @@ function Home({
             <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
               <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
               <div className="journey-copy">
-                <strong>{tripTitle(trip.city, trip.startDate)}</strong>
+                <strong>{tripTitle(trip.country, trip.startDate, trip.city)}</strong>
                 <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
               </div>
-              <TripPreview trip={trip} />
+              <TripPreview trip={trip} onPhotoAspect={(photoId, aspectRatio) => onUpdatePhotoAspect(trip.id, photoId, aspectRatio)} />
             </button>
           ))}
         </section>
@@ -474,7 +546,13 @@ function Home({
   );
 }
 
-function TripPreview({ trip }: { trip: TripRecord }) {
+function TripPreview({
+  trip,
+  onPhotoAspect,
+}: {
+  trip: TripRecord;
+  onPhotoAspect: (photoId: string, aspectRatio: number) => void;
+}) {
   if (trip.photos.length === 0) return <span className="journey-photo-count">0</span>;
   return (
     <span className="preview-stack" aria-label={`${trip.photos.length}장의 사진`}>
@@ -482,36 +560,51 @@ function TripPreview({ trip }: { trip: TripRecord }) {
         <span
           className="preview-polaroid"
           key={photo.id}
-          style={{ "--preview-index": index, "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR } as CSSProperties}
+          style={photoFrameStyle(photo, {
+            "--preview-index": index,
+            "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR,
+          } as CSSProperties)}
         >
-          <img src={photo.dataUrl} alt="" />
-          {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="" /> : null}
+          <span className="preview-photo">
+            <img
+              src={photo.dataUrl}
+              alt=""
+              onLoad={(event) => {
+                const aspectRatio = renderedImageAspect(event.currentTarget);
+                if (aspectRatio && isDifferentAspect(photo.aspectRatio, aspectRatio)) onPhotoAspect(photo.id, aspectRatio);
+              }}
+            />
+            {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="" /> : null}
+          </span>
         </span>
       ))}
     </span>
   );
 }
 
-function NewTrip({
+function TripForm({
+  initialTrip,
   onBack,
   onSave,
   theme,
   onToggleTheme,
 }: {
+  initialTrip?: TripRecord;
   onBack: () => void;
-  onSave: (city: string, startDate: string, endDate: string) => void;
+  onSave: (details: TripDetails) => void;
 } & ThemeProps) {
-  const [city, setCity] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [city, setCity] = useState(initialTrip?.city ?? "");
+  const [country, setCountry] = useState(initialTrip?.country ?? "");
+  const [startDate, setStartDate] = useState(initialTrip?.startDate ?? "");
+  const [endDate, setEndDate] = useState(initialTrip?.endDate ?? "");
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const title = tripTitle(city, startDate);
+  const title = tripTitle(country, startDate, city);
 
   const save = () => {
-    if (!city.trim() || !startDate || !endDate) return setError("도시와 날짜를 모두 입력해 주세요.");
+    if (!country.trim() || !city.trim() || !startDate || !endDate) return setError("나라, 도시와 날짜를 모두 입력해 주세요.");
     if (endDate < startDate) return setError("여행 종료일을 확인해 주세요.");
-    onSave(city, startDate, endDate);
+    onSave({ country, city, startDate, endDate });
   };
 
   return (
@@ -525,10 +618,14 @@ function NewTrip({
       </header>
       <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
       <section className="trip-form">
-        <h1>{title || "새 여행"}</h1>
+        <h1>{title || (initialTrip ? "여행 수정" : "새 여행")}</h1>
+        <label>
+          <span>나라</span>
+          <input value={country} onChange={(event) => { setCountry(event.target.value); setError(""); }} placeholder="나라 이름" autoFocus />
+        </label>
         <label>
           <span>도시</span>
-          <input value={city} onChange={(event) => { setCity(event.target.value); setError(""); }} placeholder="도시 이름" autoFocus />
+          <input value={city} onChange={(event) => { setCity(event.target.value); setError(""); }} placeholder="도시 이름" />
         </label>
         <div className="date-grid">
           <label>
@@ -549,6 +646,7 @@ function NewTrip({
 function TripDetail({
   trip,
   onBack,
+  onEdit,
   onAddPhotos,
   onUpdatePhoto,
   onDeletePhoto,
@@ -557,6 +655,7 @@ function TripDetail({
 }: {
   trip?: TripRecord;
   onBack: () => void;
+  onEdit: () => void;
   onAddPhotos: (photos: PhotoRecord[]) => void;
   onUpdatePhoto: (photoId: string, next: PhotoUpdate) => void;
   onDeletePhoto: (photoId: string) => void;
@@ -565,6 +664,7 @@ function TripDetail({
   const [menuOpen, setMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [importNotice, setImportNotice] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const selectedPhoto = trip?.photos.find((photo) => photo.id === selectedPhotoId) ?? null;
@@ -577,17 +677,22 @@ function TripDetail({
     event.target.value = "";
     if (!files.length) return;
     setUploading(true);
+    setImportNotice("");
     setUploadProgress({ done: 0, total: files.length });
     try {
       await yieldToBrowser();
       let done = 0;
+      let failed = 0;
       for (let index = 0; index < files.length; index += 2) {
-        const batch = await Promise.all(files.slice(index, index + 2).map(toPhotoRecord));
-        onAddPhotos(batch);
-        done += batch.length;
+        const results = await Promise.allSettled(files.slice(index, index + 2).map(toPhotoRecord));
+        const batch = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        failed += results.length - batch.length;
+        if (batch.length) onAddPhotos(batch);
+        done += results.length;
         setUploadProgress({ done, total: files.length });
         await yieldToBrowser();
       }
+      if (failed) setImportNotice(`${failed}장은 지원되지 않는 형식이라 제외했습니다.`);
     } finally {
       setUploading(false);
     }
@@ -606,13 +711,14 @@ function TripDetail({
             <MenuButton open={menuOpen} onClick={() => setMenuOpen((current) => !current)} />
           </div>
         </header>
-        <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
+        <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} onEditTrip={onEdit} />
         <section className="trip-heading">
           <h1>{trip.city}</h1>
           <div className="trip-meta">
-            <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+            <span>{trip.country?.trim() ? `${trip.country.trim()} · ${formatTripRange(trip.startDate, trip.endDate)}` : formatTripRange(trip.startDate, trip.endDate)}</span>
             <span>{String(trip.photos.length).padStart(2, "0")}</span>
           </div>
+          {importNotice ? <p className="import-notice" role="status">{importNotice}</p> : null}
         </section>
 
         {trip.photos.length === 0 ? (
@@ -638,12 +744,19 @@ function TripDetail({
                           <button
                             className="flat-polaroid"
                             type="button"
-                            style={{ "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR } as CSSProperties}
+                            style={photoFrameStyle(photo, { "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR } as CSSProperties)}
                             onClick={() => setSelectedPhotoId(photo.id)}
                             aria-label="폴라로이드 열기"
                           >
                             <span className="flat-photo">
-                              <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} />
+                              <img
+                                src={photo.dataUrl}
+                                alt={photo.caption || "여행 사진"}
+                                onLoad={(event) => {
+                                  const aspectRatio = renderedImageAspect(event.currentTarget);
+                                  if (aspectRatio && isDifferentAspect(photo.aspectRatio, aspectRatio)) onUpdatePhoto(photo.id, { aspectRatio });
+                                }}
+                              />
                               {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="사진 위 낙서" /> : null}
                             </span>
                           </button>
@@ -708,6 +821,7 @@ function PhotoViewer({
   const [caption, setCaption] = useState(photo.caption);
   const [drawing, setDrawing] = useState(photo.drawing ?? "");
   const [frameColor, setFrameColor] = useState(photo.frameColor ?? DEFAULT_FRAME_COLOR);
+  const [aspectRatio, setAspectRatio] = useState(validPhotoAspect(photo.aspectRatio));
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
@@ -743,6 +857,13 @@ function PhotoViewer({
     if (wasTap) setMode("edit");
   };
 
+  const rememberPhotoAspect = (image: HTMLImageElement) => {
+    const nextAspect = renderedImageAspect(image);
+    if (!nextAspect || !isDifferentAspect(aspectRatio, nextAspect)) return;
+    setAspectRatio(nextAspect);
+    onSave({ aspectRatio: nextAspect });
+  };
+
   const save = async () => {
     if (saving) return;
     setSaving(true);
@@ -753,7 +874,7 @@ function PhotoViewer({
       // Fall back to the latest completed export if the canvas encoder is unavailable.
     }
     setDrawing(latestDrawing);
-    onSave({ caption: caption.trim(), drawing: latestDrawing || undefined, frameColor });
+    onSave({ caption: caption.trim(), drawing: latestDrawing || undefined, frameColor, aspectRatio });
     setSaving(false);
     setMode("model");
   };
@@ -783,13 +904,13 @@ function PhotoViewer({
           {caption.trim() ? <p className="model-caption">{caption.trim()}</p> : null}
           <div
             className="polaroid-model"
-            style={{
+            style={photoFrameStyle({ aspectRatio }, {
               "--frame-color": frameColor,
               transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
-            } as CSSProperties}
+            } as CSSProperties)}
           >
             <div className="model-face model-front">
-              <ModelPhoto photo={photo} drawing={drawing} />
+              <ModelPhoto photo={photo} drawing={drawing} onAspectChange={rememberPhotoAspect} />
             </div>
             <div className="model-face model-back" />
             <span className="model-edge edge-top" />
@@ -807,6 +928,8 @@ function PhotoViewer({
           onCaptionChange={setCaption}
           frameColor={frameColor}
           onFrameColorChange={setFrameColor}
+          aspectRatio={aspectRatio}
+          onAspectChange={rememberPhotoAspect}
           drawingExporterRef={drawingExporterRef}
         />
       )}
@@ -814,10 +937,18 @@ function PhotoViewer({
   );
 }
 
-function ModelPhoto({ photo, drawing }: { photo: PhotoRecord; drawing: string }) {
+function ModelPhoto({
+  photo,
+  drawing,
+  onAspectChange,
+}: {
+  photo: PhotoRecord;
+  drawing: string;
+  onAspectChange: (image: HTMLImageElement) => void;
+}) {
   return (
     <div className="model-photo">
-      <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} />
+      <img src={photo.dataUrl} alt={photo.caption || "여행 사진"} onLoad={(event) => onAspectChange(event.currentTarget)} />
       {drawing ? <img className="drawing-layer" src={drawing} alt="사진 위 낙서" /> : null}
     </div>
   );
@@ -836,6 +967,13 @@ type EditorGesture =
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function drawingCanvasSize(aspectRatio: number) {
+  const aspect = validPhotoAspect(aspectRatio);
+  return aspect >= 1
+    ? { width: 1200, height: Math.max(1, Math.round(1200 / aspect)) }
+    : { width: Math.max(1, Math.round(1200 * aspect)), height: 1200 };
 }
 
 function pointerDistance(a: { x: number; y: number }, b: { x: number; y: number }) {
@@ -937,6 +1075,8 @@ function PhotoEditor({
   onCaptionChange,
   frameColor,
   onFrameColorChange,
+  aspectRatio,
+  onAspectChange,
   drawingExporterRef,
 }: {
   photo: PhotoRecord;
@@ -946,6 +1086,8 @@ function PhotoEditor({
   onCaptionChange: (value: string) => void;
   frameColor: string;
   onFrameColorChange: (value: string) => void;
+  aspectRatio: number;
+  onAspectChange: (image: HTMLImageElement) => void;
   drawingExporterRef: DrawingExporterRef;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -970,6 +1112,7 @@ function PhotoEditor({
   const history = useRef<DrawingSnapshot[]>([]);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<EditorGesture | null>(null);
+  const canvasSize = drawingCanvasSize(aspectRatio);
 
   useEffect(() => {
     if (drawingRef.current || drawing === lastPublishedDrawing.current) return;
@@ -987,7 +1130,7 @@ function PhotoEditor({
     };
     image.src = drawing;
     return () => { cancelled = true; };
-  }, [drawing]);
+  }, [drawing, canvasSize.height, canvasSize.width]);
 
   useEffect(() => {
     const exporter = async () => {
@@ -1239,7 +1382,7 @@ function PhotoEditor({
 
   return (
     <div className="editor-page">
-      <div className="editor-polaroid" style={{ "--frame-color": frameColor } as CSSProperties}>
+      <div className="editor-polaroid" style={photoFrameStyle({ aspectRatio }, { "--frame-color": frameColor } as CSSProperties)}>
         <div
           ref={editorPhotoRef}
           className={`editor-photo ${tool === "move" ? "is-panning" : "is-drawing"}`}
@@ -1253,13 +1396,13 @@ function PhotoEditor({
             className="editor-zoom-surface"
             style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
           >
-            <img src={photo.dataUrl} alt="편집할 여행 사진" />
-            <canvas ref={canvasRef} className="drawing-canvas" width="900" height="1200" aria-label="사진 위에 낙서하기" />
+            <img src={photo.dataUrl} alt="편집할 여행 사진" onLoad={(event) => onAspectChange(event.currentTarget)} />
+            <canvas ref={canvasRef} className="drawing-canvas" width={canvasSize.width} height={canvasSize.height} aria-label="사진 위에 낙서하기" />
             <canvas
               ref={strokeCanvasRef}
               className="stroke-canvas"
-              width="900"
-              height="1200"
+              width={canvasSize.width}
+              height={canvasSize.height}
               style={{ opacity: brushKind === "marker" ? 0.24 : 1 }}
               aria-hidden="true"
             />
@@ -1342,19 +1485,23 @@ function PhotoEditor({
 
 async function toPhotoRecord(file: File): Promise<PhotoRecord> {
   const capturedAt = (await readExifDate(file)) ?? new Date(file.lastModified || Date.now());
+  const resized = await resizeImage(file);
   return {
     id: `photo-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`,
     name: file.name,
-    dataUrl: await resizeImage(file),
+    dataUrl: resized.dataUrl,
     capturedAt: capturedAt.toISOString(),
     caption: "",
     frameColor: DEFAULT_FRAME_COLOR,
+    aspectRatio: resized.aspectRatio,
   };
 }
 
-async function resizeImage(file: File): Promise<string> {
+async function resizeImage(file: File): Promise<{ dataUrl: string; aspectRatio: number }> {
+  let bitmap: ImageBitmap | null = null;
   try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const aspectRatio = validPhotoAspect(bitmap.width / bitmap.height);
     const maxSide = 900;
     const ratio = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
@@ -1363,11 +1510,24 @@ async function resizeImage(file: File): Promise<string> {
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Canvas unavailable");
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    return await canvasToDataUrl(canvas);
+    return { dataUrl: await canvasToDataUrl(canvas), aspectRatio };
   } catch {
-    return fileToDataUrl(file);
+    const dataUrl = await fileToDataUrl(file);
+    const aspectRatio = await dataUrlAspect(dataUrl);
+    if (!aspectRatio) throw new Error("Unsupported image format");
+    return { dataUrl, aspectRatio };
+  } finally {
+    bitmap?.close();
   }
+}
+
+function dataUrlAspect(dataUrl: string) {
+  return new Promise<number | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(renderedImageAspect(image));
+    image.onerror = () => resolve(null);
+    image.src = dataUrl;
+  });
 }
 
 function canvasToDataUrl(canvas: HTMLCanvasElement) {

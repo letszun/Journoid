@@ -1,5 +1,12 @@
 # Journoid changelog
 
+## 0.7.0 — 2026-08-14
+
+- Made every 2D, preview, 3D, and doodle polaroid frame follow its source photo's aspect ratio.
+- Added country names to trip details and changed home titles to the `{month}월의 {country}` format.
+- Added editing for a trip's country, city, start date, and end date from the three-dot menu.
+- Made batch imports skip unreadable image formats instead of stopping the entire selection.
+
 ## 0.6.0 — 2026-08-14
 
 - Added wider spacing and slightly smaller frames to the 2D polaroid gallery.
