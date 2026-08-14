@@ -67,6 +67,7 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
+const APP_VERSION = "0.4.0";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 const DEFAULT_DRAWING_COLOR = "#111111";
@@ -226,6 +227,10 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
   });
 }
 
+function VersionMark() {
+  return <span className="app-version" aria-label={`앱 버전 ${APP_VERSION}`}>v{APP_VERSION}</span>;
+}
+
 export default function Prototype() {
   const [trips, setTrips] = useState<TripRecord[]>([]);
   const [storageReady, setStorageReady] = useState(false);
@@ -304,6 +309,7 @@ function Home({ trips, onAdd, onOpen }: { trips: TripRecord[]; onAdd: () => void
     <main className="screen home-screen">
       <header className="topbar">
         <span className="wordmark">journoid</span>
+        <VersionMark />
         <button className="icon-button" type="button" onClick={onAdd} aria-label="새 여행 추가"><PlusIcon /></button>
       </header>
 
@@ -371,6 +377,7 @@ function NewTrip({ onBack, onSave }: { onBack: () => void; onSave: (city: string
     <main className="screen form-screen">
       <header className="topbar">
         <button className="icon-button" type="button" onClick={onBack} aria-label="뒤로"><ArrowLeftIcon /></button>
+        <VersionMark />
         <button className="icon-button" type="button" onClick={save} aria-label="저장"><CheckIcon /></button>
       </header>
       <section className="trip-form">
@@ -442,6 +449,7 @@ function TripDetail({
       <main className="screen trip-screen">
         <header className="topbar sticky-topbar">
           <button className="icon-button" type="button" onClick={onBack} aria-label="여행 목록"><ArrowLeftIcon /></button>
+          <VersionMark />
           <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
             <ImageIcon />
             <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
@@ -542,7 +550,9 @@ function PhotoViewer({
   const [caption, setCaption] = useState(photo.caption);
   const [drawing, setDrawing] = useState(photo.drawing ?? "");
   const [frameColor, setFrameColor] = useState(photo.frameColor ?? DEFAULT_FRAME_COLOR);
+  const [saving, setSaving] = useState(false);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
+  const drawingExporterRef = useRef<(() => Promise<string>) | null>(null);
 
   useEffect(() => {
     document.body.classList.add("viewer-open");
@@ -574,8 +584,18 @@ function PhotoViewer({
     if (wasTap) setMode("edit");
   };
 
-  const save = () => {
-    onSave({ caption: caption.trim(), drawing: drawing || undefined, frameColor });
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    let latestDrawing = drawing;
+    try {
+      if (drawingExporterRef.current) latestDrawing = await drawingExporterRef.current();
+    } catch {
+      // Fall back to the latest completed export if the canvas encoder is unavailable.
+    }
+    setDrawing(latestDrawing);
+    onSave({ caption: caption.trim(), drawing: latestDrawing || undefined, frameColor });
+    setSaving(false);
     setMode("model");
   };
 
@@ -585,7 +605,8 @@ function PhotoViewer({
         <button className="icon-button" type="button" onClick={mode === "edit" ? () => setMode("model") : onClose} aria-label={mode === "edit" ? "모델로 돌아가기" : "닫기"}>
           {mode === "edit" ? <ArrowLeftIcon /> : <Cross1Icon />}
         </button>
-        {mode === "edit" ? <button className="save-text-button" type="button" onClick={save}>저장</button> : null}
+        <VersionMark />
+        {mode === "edit" ? <button className="save-text-button" type="button" onClick={save} disabled={saving}>저장</button> : null}
       </header>
 
       {mode === "model" ? (
@@ -617,6 +638,7 @@ function PhotoViewer({
           onCaptionChange={setCaption}
           frameColor={frameColor}
           onFrameColorChange={setFrameColor}
+          drawingExporterRef={drawingExporterRef}
         />
       )}
     </div>
@@ -685,36 +707,58 @@ function drawBrushSegment(
   size: number,
   pressure: number,
 ) {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const distance = Math.hypot(deltaX, deltaY);
+  if (distance < 0.35) return;
+
   context.save();
   context.globalCompositeOperation = "source-over";
 
   if (kind === "marker") {
-    drawLine(context, from, to, Math.max(24, size * 5), color, 0.24, { x: 0, y: 0 }, "square");
+    drawLine(context, from, to, Math.max(24, size * 5), color, 1, { x: 0, y: 0 }, "square");
     context.restore();
     return;
   }
 
   if (kind === "pencil") {
-    const textureWidth = Math.max(0.7, size * (0.22 + pressure * 0.18));
-    const jitter = Math.max(0.6, size * 0.35);
-    for (let index = 0; index < 5; index += 1) {
+    const normal = { x: -deltaY / distance, y: deltaX / distance };
+    const grain = Math.max(0.55, size * 0.28);
+    const textureWidth = Math.max(0.7, size * (0.2 + pressure * 0.16));
+    const fibers = [
+      { offset: -0.72, alpha: 0.16 },
+      { offset: 0, alpha: 0.36 },
+      { offset: 0.68, alpha: 0.14 },
+    ];
+    fibers.forEach((fiber, index) => {
+      const phase = Math.sin((from.x + from.y * 0.7 + index * 19) * 0.045) * grain * 0.22;
+      const amount = fiber.offset * grain + phase;
       drawLine(
         context,
         from,
         to,
         textureWidth,
         color,
-        0.18 + Math.random() * 0.14,
-        { x: (Math.random() - 0.5) * jitter, y: (Math.random() - 0.5) * jitter },
+        fiber.alpha + pressure * 0.06,
+        { x: normal.x * amount, y: normal.y * amount },
       );
-    }
+    });
     context.restore();
     return;
   }
 
-  drawLine(context, from, to, size * (0.72 + pressure * 0.5), color, 0.96);
+  drawLine(context, from, to, size * (0.72 + pressure * 0.5), color, 1);
   context.restore();
 }
+
+type DrawingSnapshot = {
+  canvas: HTMLCanvasElement;
+  hasDrawing: boolean;
+};
+
+type DrawingExporterRef = {
+  current: (() => Promise<string>) | null;
+};
 
 function PhotoEditor({
   photo,
@@ -724,6 +768,7 @@ function PhotoEditor({
   onCaptionChange,
   frameColor,
   onFrameColorChange,
+  drawingExporterRef,
 }: {
   photo: PhotoRecord;
   drawing: string;
@@ -732,8 +777,10 @@ function PhotoEditor({
   onCaptionChange: (value: string) => void;
   frameColor: string;
   onFrameColorChange: (value: string) => void;
+  drawingExporterRef: DrawingExporterRef;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const strokeCanvasRef = useRef<HTMLCanvasElement>(null);
   const editorPhotoRef = useRef<HTMLDivElement>(null);
   const [brushSize, setBrushSize] = useState(4);
   const [brushKind, setBrushKind] = useState<BrushKind>("pen");
@@ -745,21 +792,45 @@ function PhotoEditor({
   const panRef = useRef({ x: 0, y: 0 });
   const drawingRef = useRef(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
-  const history = useRef<string[]>([]);
+  const lastPressure = useRef(0.5);
+  const strokeMade = useRef(false);
+  const activeBrush = useRef<BrushKind>("pen");
+  const hasDrawing = useRef(Boolean(drawing));
+  const drawingRevision = useRef(0);
+  const lastPublishedDrawing = useRef("");
+  const history = useRef<DrawingSnapshot[]>([]);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<EditorGesture | null>(null);
 
   useEffect(() => {
+    if (drawingRef.current || drawing === lastPublishedDrawing.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
+    hasDrawing.current = Boolean(drawing);
     if (!drawing) return;
+    let cancelled = false;
     const image = new Image();
-    image.onload = () => context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.onload = () => {
+      if (!cancelled) context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    };
     image.src = drawing;
+    return () => { cancelled = true; };
   }, [drawing]);
+
+  useEffect(() => {
+    const exporter = async () => {
+      const canvas = canvasRef.current;
+      if (!canvas || !hasDrawing.current) return "";
+      return canvasToPngDataUrl(canvas);
+    };
+    drawingExporterRef.current = exporter;
+    return () => {
+      if (drawingExporterRef.current === exporter) drawingExporterRef.current = null;
+    };
+  }, [drawingExporterRef]);
 
   const clampPan = (next: { x: number; y: number }, nextZoom = zoomRef.current) => {
     const rect = editorPhotoRef.current?.getBoundingClientRect();
@@ -805,30 +876,88 @@ function PhotoEditor({
     };
   };
 
+  const pushHistory = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const snapshot = document.createElement("canvas");
+    snapshot.width = canvas.width;
+    snapshot.height = canvas.height;
+    snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
+    history.current.push({ canvas: snapshot, hasDrawing: hasDrawing.current });
+    if (history.current.length > 12) history.current.shift();
+  };
+
+  const publishDrawing = () => {
+    const canvas = canvasRef.current;
+    const revision = ++drawingRevision.current;
+    if (!canvas || !hasDrawing.current) {
+      lastPublishedDrawing.current = "";
+      onDrawingChange("");
+      return;
+    }
+    void canvasToPngDataUrl(canvas).then((value) => {
+      if (drawingRevision.current !== revision) return;
+      lastPublishedDrawing.current = value;
+      onDrawingChange(value);
+    });
+  };
+
   const finishDrawing = () => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
     lastPoint.current = null;
-    onDrawingChange(canvasRef.current?.toDataURL("image/png") ?? "");
+    const canvas = canvasRef.current;
+    const strokeCanvas = strokeCanvasRef.current;
+    if (strokeMade.current && canvas && strokeCanvas) {
+      const context = canvas.getContext("2d");
+      if (context) {
+        context.save();
+        context.globalAlpha = activeBrush.current === "marker" ? 0.24 : 1;
+        context.drawImage(strokeCanvas, 0, 0);
+        context.restore();
+        hasDrawing.current = true;
+        publishDrawing();
+      }
+    } else {
+      history.current.pop();
+    }
+    strokeCanvas?.getContext("2d")?.clearRect(0, 0, strokeCanvas.width, strokeCanvas.height);
+    strokeMade.current = false;
   };
 
   const startDrawing = (event: ReactPointerEvent<HTMLDivElement>) => {
-    history.current.push(canvasRef.current?.toDataURL() ?? "");
+    pushHistory();
+    const strokeCanvas = strokeCanvasRef.current;
+    strokeCanvas?.getContext("2d")?.clearRect(0, 0, strokeCanvas.width, strokeCanvas.height);
     drawingRef.current = true;
+    strokeMade.current = false;
+    activeBrush.current = brushKind;
+    lastPressure.current = event.pressure > 0 ? clamp(event.pressure, 0.2, 1) : 0.5;
     lastPoint.current = pointFor(event.clientX, event.clientY);
     gesture.current = { kind: "draw", pointerId: event.pointerId };
   };
 
   const moveDrawing = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drawingRef.current || !lastPoint.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext("2d");
+    const strokeCanvas = strokeCanvasRef.current;
+    if (!strokeCanvas) return;
+    const context = strokeCanvas.getContext("2d");
     if (!context) return;
-    const point = pointFor(event.clientX, event.clientY);
-    const pressure = event.pressure > 0 ? clamp(event.pressure, 0.2, 1) : 0.5;
-    drawBrushSegment(context, lastPoint.current, point, brushKind, brushColor, brushSize, pressure);
-    lastPoint.current = point;
+    const nativeEvent = event.nativeEvent;
+    const samples = typeof nativeEvent.getCoalescedEvents === "function"
+      ? nativeEvent.getCoalescedEvents()
+      : [nativeEvent];
+    samples.forEach((sample) => {
+      if (!lastPoint.current) return;
+      const point = pointFor(sample.clientX, sample.clientY);
+      if (pointerDistance(lastPoint.current, point) < 0.35) return;
+      const rawPressure = sample.pressure > 0 ? clamp(sample.pressure, 0.2, 1) : 0.5;
+      const pressure = lastPressure.current * 0.68 + rawPressure * 0.32;
+      drawBrushSegment(context, lastPoint.current, point, activeBrush.current, brushColor, brushSize, pressure);
+      lastPressure.current = pressure;
+      lastPoint.current = point;
+      strokeMade.current = true;
+    });
   };
 
   const beginPinch = () => {
@@ -913,12 +1042,25 @@ function PhotoEditor({
 
   const undo = () => {
     const previous = history.current.pop();
-    if (previous !== undefined) onDrawingChange(previous);
+    const canvas = canvasRef.current;
+    if (!previous || !canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(previous.canvas, 0, 0);
+    hasDrawing.current = previous.hasDrawing;
+    publishDrawing();
   };
 
   const clear = () => {
-    history.current.push(canvasRef.current?.toDataURL() ?? "");
-    onDrawingChange("");
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    pushHistory();
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    const strokeCanvas = strokeCanvasRef.current;
+    strokeCanvas?.getContext("2d")?.clearRect(0, 0, strokeCanvas.width, strokeCanvas.height);
+    hasDrawing.current = false;
+    publishDrawing();
   };
 
   const selectBrush = (kind: BrushKind) => {
@@ -943,7 +1085,15 @@ function PhotoEditor({
             style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
           >
             <img src={photo.dataUrl} alt="편집할 여행 사진" />
-            <canvas ref={canvasRef} width="900" height="1200" aria-label="사진 위에 낙서하기" />
+            <canvas ref={canvasRef} className="drawing-canvas" width="900" height="1200" aria-label="사진 위에 낙서하기" />
+            <canvas
+              ref={strokeCanvasRef}
+              className="stroke-canvas"
+              width="900"
+              height="1200"
+              style={{ opacity: brushKind === "marker" ? 0.24 : 1 }}
+              aria-hidden="true"
+            />
           </div>
         </div>
       </div>
@@ -1057,6 +1207,15 @@ function canvasToDataUrl(canvas: HTMLCanvasElement) {
       if (!blob) return reject(new Error("Image encoding failed"));
       fileToDataUrl(blob).then(resolve, reject);
     }, "image/jpeg", 0.74);
+  });
+}
+
+function canvasToPngDataUrl(canvas: HTMLCanvasElement) {
+  return new Promise<string>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error("Drawing encoding failed"));
+      fileToDataUrl(blob).then(resolve, reject);
+    }, "image/png");
   });
 }
 

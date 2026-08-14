@@ -32,6 +32,7 @@
 }
 
 .topbar {
+  position: relative;
   display: flex;
   min-height: 48px;
   align-items: center;
@@ -55,6 +56,20 @@
   letter-spacing: 0.14em;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.app-version {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #8a8a8a;
+  font-size: 8px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .icon-button,
@@ -122,6 +137,14 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
+}
+
+.save-text-button:disabled {
+  opacity: 0.42;
+}
+
+.viewer-header .app-version {
+  top: calc(max(var(--gutter), env(safe-area-inset-top)) + (var(--control-size) / 2));
 }
 
 .home-masthead {
@@ -767,6 +790,10 @@
 
 .editor-zoom-surface canvas {
   pointer-events: none;
+}
+
+.stroke-canvas {
+  will-change: opacity;
 }
 
 .editor-controls {
