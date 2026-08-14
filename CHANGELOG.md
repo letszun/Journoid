@@ -1,5 +1,12 @@
 # Journoid changelog
 
+## 0.6.0 — 2026-08-14
+
+- Added wider spacing and slightly smaller frames to the 2D polaroid gallery.
+- Reduced home trip-title typography and photo-preview size.
+- Removed repeated month labels from trip headings and date groups.
+- Split captured photos into six precise time-of-day periods.
+
 ## 0.5.1 — 2026-08-14
 
 - Removed the leftover spacer between the home header and the first trip.

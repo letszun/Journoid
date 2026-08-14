@@ -22,7 +22,10 @@
 - Persist the full journal, including image and drawing data, in the `journoid` IndexedDB database. Keep `journoid.storage` as the permanent unversioned local-storage pointer, automatically migrate `journoid-trips-v2` and `journey-polaroid-trips-v1`, and use `journoid.trips` only as a fallback when IndexedDB is unavailable.
 - Keep drawing input low-latency: never synchronously encode PNG data at pointer-down, collect coalesced pointer samples, smooth pressure, render the active stroke on a separate canvas, and composite translucent marker strokes only once so segment joins do not form dark dots.
 - Keep the home collection free of redundant masthead copy such as `여행`; the first journal row begins directly below the compact app header with no reserved spacer or duplicate rule.
-- Keep trip galleries compact: use three small 2D polaroids per mobile row, four on wider screens, and a thin 4px frame inset so more of the journal is visible at once.
+- Keep trip galleries airy and compact: use three small 2D polaroids per mobile row, four on wider screens, a thin 4px frame inset, at least 12px horizontal separation, and 32px row spacing.
+- Home journey rows use restrained 20–30px titles and compact 52px photo previews; they should read as an index rather than a second gallery.
+- Inside a trip, show the city without a redundant `{month}월의` eyebrow. Date group headers show only the zero-padded day and weekday, never the month already present in the trip range.
+- Group photos in this display order and at these exact boundaries: 아침 05:00–11:29, 점심 11:30–14:29, 오후 14:30–17:29, 저녁 17:30–21:29, 밤 21:30–01:59, 새벽 02:00–04:59.
 - Put the current semantic `APP_VERSION` inside the three-dot settings menu instead of displaying it in headers. Increment it for each published update and record user-visible changes in `CHANGELOG.md` so a home-screen installation can be checked against the latest deployment.
 - Offer a persistent monochrome dark theme from the three-dot settings menu and store the preference at the stable `journoid.theme` local-storage key.
 - Photo deletion belongs in the full-screen photo detail menu and must require an explicit confirmation before removing the IndexedDB-backed record.

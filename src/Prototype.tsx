@@ -52,13 +52,14 @@ type View =
   | { name: "new-trip" }
   | { name: "trip"; tripId: string };
 
+type PhotoPeriod = "아침" | "점심" | "오후" | "저녁" | "밤" | "새벽";
+
 type PhotoGroup = {
   key: string;
   day: string;
-  month: string;
   weekday: string;
   count: number;
-  periods: { label: string; photos: PhotoRecord[] }[];
+  periods: { label: PhotoPeriod; photos: PhotoRecord[] }[];
 };
 
 type Theme = "light" | "dark";
@@ -76,11 +77,12 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.5.1";
+const APP_VERSION = "0.6.0";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 const DEFAULT_DRAWING_COLOR = "#111111";
 const DRAWING_COLORS = ["#111111", "#ffffff", "#ff453a", "#0a84ff", "#ffd60a"];
+const PHOTO_PERIOD_ORDER: PhotoPeriod[] = ["아침", "점심", "오후", "저녁", "밤", "새벽"];
 
 type BrushKind = "pen" | "pencil" | "marker";
 
@@ -197,13 +199,19 @@ function tripTitle(city: string, startDate: string) {
   return `${month}월의 ${city.trim()}`;
 }
 
-function tripMonth(startDate: string) {
-  return new Date(`${startDate}T12:00:00`).getMonth() + 1;
-}
-
 function formatTripRange(startDate: string, endDate: string) {
   const formatter = new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" });
   return `${formatter.format(new Date(`${startDate}T12:00:00`))} — ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
+}
+
+function photoPeriod(date: Date): PhotoPeriod {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  if (minutes >= 300 && minutes < 690) return "아침";
+  if (minutes >= 690 && minutes < 870) return "점심";
+  if (minutes >= 870 && minutes < 1050) return "오후";
+  if (minutes >= 1050 && minutes < 1290) return "저녁";
+  if (minutes >= 1290 || minutes < 120) return "밤";
+  return "새벽";
 }
 
 function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
@@ -218,20 +226,21 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
 
   return Array.from(byDate.entries()).map(([key, dayPhotos]) => {
     const date = new Date(`${key}T12:00:00`);
-    const periodMap = new Map<string, PhotoRecord[]>();
+    const periodMap = new Map<PhotoPeriod, PhotoRecord[]>();
     dayPhotos.forEach((photo) => {
-      const hour = new Date(photo.capturedAt).getHours();
-      const label = hour < 6 ? "새벽" : hour < 12 ? "아침" : hour < 18 ? "오후" : "저녁";
+      const label = photoPeriod(new Date(photo.capturedAt));
       periodMap.set(label, [...(periodMap.get(label) ?? []), photo]);
     });
 
     return {
       key,
       day: String(date.getDate()).padStart(2, "0"),
-      month: new Intl.DateTimeFormat("ko-KR", { month: "long" }).format(date),
       weekday: new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date),
       count: dayPhotos.length,
-      periods: Array.from(periodMap.entries()).map(([label, periodPhotos]) => ({ label, photos: periodPhotos })),
+      periods: PHOTO_PERIOD_ORDER.flatMap((label) => {
+        const periodPhotos = periodMap.get(label);
+        return periodPhotos ? [{ label, photos: periodPhotos }] : [];
+      }),
     };
   });
 }
@@ -599,7 +608,6 @@ function TripDetail({
         </header>
         <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
         <section className="trip-heading">
-          <span className="trip-eyebrow">{tripMonth(trip.startDate)}월의</span>
           <h1>{trip.city}</h1>
           <div className="trip-meta">
             <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
@@ -618,7 +626,7 @@ function TripDetail({
               <section className="date-section" key={group.key}>
                 <header className="date-heading">
                   <strong className="date-number">{group.day}</strong>
-                  <span className="date-meta"><b>{group.month}</b>{group.weekday}</span>
+                  <span className="date-meta">{group.weekday}</span>
                   <span className="date-count">{String(group.count).padStart(2, "0")}</span>
                 </header>
                 {group.periods.map((period) => (

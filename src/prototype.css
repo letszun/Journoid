@@ -259,11 +259,11 @@
 .journey-row {
   display: grid;
   width: 100%;
-  min-height: 144px;
-  grid-template-columns: 24px minmax(0, 1fr) 88px;
+  min-height: 112px;
+  grid-template-columns: 20px minmax(0, 1fr) 60px;
   align-items: center;
   column-gap: 8px;
-  padding: 20px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
   color: var(--ink);
   text-align: left;
@@ -294,10 +294,10 @@
 .journey-copy strong {
   display: block;
   overflow: hidden;
-  font-size: clamp(26px, 8vw, 42px);
-  font-weight: 700;
-  letter-spacing: -0.045em;
-  line-height: 1;
+  font-size: clamp(20px, 6vw, 30px);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -313,7 +313,7 @@
 
 .journey-copy span {
   display: block;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .journey-photo-count {
@@ -322,20 +322,20 @@
 
 .preview-stack {
   position: relative;
-  width: 80px;
-  height: 112px;
+  width: 58px;
+  height: 84px;
   justify-self: end;
 }
 
 .preview-polaroid {
-  --offset: calc(var(--preview-index) * 5px);
+  --offset: calc(var(--preview-index) * 4px);
   position: absolute;
   top: var(--offset);
   left: var(--offset);
   display: block;
-  width: 72px;
-  height: 106px;
-  padding: 4px 4px 18px;
+  width: 52px;
+  height: 78px;
+  padding: 3px 3px 14px;
   background: var(--frame-color, #fff);
   outline: 1px solid var(--frame-outline);
   box-shadow: none;
@@ -344,9 +344,9 @@
 .preview-polaroid > img:not(.drawing-layer),
 .preview-polaroid .drawing-layer {
   position: absolute;
-  inset: 4px 4px 18px;
-  width: calc(100% - 8px);
-  height: calc(100% - 22px);
+  inset: 3px 3px 14px;
+  width: calc(100% - 6px);
+  height: calc(100% - 17px);
   object-fit: cover;
 }
 
@@ -430,16 +430,6 @@
 
 .trip-heading {
   padding: 28px 0 32px;
-}
-
-.trip-eyebrow {
-  display: block;
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
 }
 
 .trip-heading h1 {
@@ -586,12 +576,6 @@
   line-height: 1;
 }
 
-.date-meta b {
-  color: var(--ink);
-  font-size: 10px;
-  font-weight: 600;
-}
-
 .date-count {
   color: var(--muted);
   font-size: 9px;
@@ -617,7 +601,8 @@
 .polaroid-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px 6px;
+  row-gap: 32px;
+  column-gap: clamp(12px, 4vw, 18px);
 }
 
 .polaroid-entry {
@@ -627,7 +612,7 @@
 .flat-polaroid {
   display: block;
   width: 100%;
-  padding: 4px 4px 18px;
+  padding: 4px 4px 16px;
   background: var(--frame-color, #fff);
   outline: 1px solid var(--frame-outline);
   box-shadow: none;
@@ -1099,7 +1084,7 @@
 
   .polaroid-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 24px 8px;
+    gap: 32px 16px;
   }
 }
 
