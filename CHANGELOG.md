@@ -1,5 +1,12 @@
 # Journoid changelog
 
+## 0.5.0 — 2026-08-14
+
+- Moved the version label into a compact three-dot settings menu.
+- Added a persistent monochrome dark theme.
+- Added photo deletion with an explicit confirmation step in photo detail.
+- Removed the redundant `여행` masthead so the journal list begins immediately.
+
 ## 0.4.0 — 2026-08-14
 
 - Removed synchronous PNG encoding from the start of every brush stroke.

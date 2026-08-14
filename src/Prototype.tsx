@@ -12,6 +12,7 @@ import {
   CheckIcon,
   ColorWheelIcon,
   Cross1Icon,
+  DotsHorizontalIcon,
   ImageIcon,
   MinusIcon,
   MoveIcon,
@@ -60,14 +61,22 @@ type PhotoGroup = {
   periods: { label: string; photos: PhotoRecord[] }[];
 };
 
+type Theme = "light" | "dark";
+
+type ThemeProps = {
+  theme: Theme;
+  onToggleTheme: () => void;
+};
+
 const STORAGE_POINTER_KEY = "journoid.storage";
 const LOCAL_FALLBACK_KEY = "journoid.trips";
+const THEME_STORAGE_KEY = "journoid.theme";
 const LEGACY_STORAGE_KEYS = ["journoid-trips-v2", "journey-polaroid-trips-v1"];
 const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.5.0";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 const DEFAULT_DRAWING_COLOR = "#111111";
@@ -227,14 +236,97 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
   });
 }
 
-function VersionMark() {
-  return <span className="app-version" aria-label={`앱 버전 ${APP_VERSION}`}>v{APP_VERSION}</span>;
+function readSavedTheme(): Theme {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button className="icon-button menu-button" type="button" onClick={onClick} aria-label="더 보기" aria-expanded={open}>
+      <DotsHorizontalIcon />
+    </button>
+  );
+}
+
+function SettingsMenu({
+  open,
+  onClose,
+  theme,
+  onToggleTheme,
+  onDeletePhoto,
+}: ThemeProps & {
+  open: boolean;
+  onClose: () => void;
+  onDeletePhoto?: () => void;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setConfirmingDelete(false);
+      return;
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="menu-scrim" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="settings-menu" role="dialog" aria-modal="true" aria-label="앱 설정">
+        {confirmingDelete ? (
+          <div className="delete-confirmation">
+            <p>이 사진을 삭제할까요?</p>
+            <div className="delete-confirm-actions">
+              <button type="button" onClick={() => setConfirmingDelete(false)}>취소</button>
+              <button type="button" onClick={() => { onClose(); onDeletePhoto?.(); }}>삭제</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button className="settings-row" type="button" onClick={onToggleTheme}>
+              <span>다크 테마</span>
+              <b>{theme === "dark" ? "켜짐" : "꺼짐"}</b>
+            </button>
+            <div className="settings-row is-static">
+              <span>버전</span>
+              <b>v{APP_VERSION}</b>
+            </div>
+            {onDeletePhoto ? (
+              <button className="settings-row delete-row" type="button" onClick={() => setConfirmingDelete(true)}>
+                <span>사진 삭제</span>
+              </button>
+            ) : null}
+          </>
+        )}
+      </section>
+    </div>
+  );
 }
 
 export default function Prototype() {
   const [trips, setTrips] = useState<TripRecord[]>([]);
   const [storageReady, setStorageReady] = useState(false);
   const [view, setView] = useState<View>({ name: "home" });
+  const [theme, setTheme] = useState<Theme>(readSavedTheme);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Theme persistence is optional when browser storage is unavailable.
+    }
+    document.documentElement.dataset.journoidTheme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   useEffect(() => {
     let active = true;
@@ -284,34 +376,71 @@ export default function Prototype() {
     )));
   };
 
-  if (!storageReady) return <div className="app-shell" aria-busy="true" />;
+  const deletePhoto = (tripId: string, photoId: string) => {
+    setTrips((current) => current.map((trip) => (
+      trip.id === tripId
+        ? { ...trip, photos: trip.photos.filter((photo) => photo.id !== photoId) }
+        : trip
+    )));
+  };
+
+  const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+
+  if (!storageReady) return <div className="app-shell" data-theme={theme} aria-busy="true" />;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       {view.name === "home" ? (
-        <Home trips={trips} onAdd={() => setView({ name: "new-trip" })} onOpen={(tripId) => setView({ name: "trip", tripId })} />
+        <Home
+          trips={trips}
+          onAdd={() => setView({ name: "new-trip" })}
+          onOpen={(tripId) => setView({ name: "trip", tripId })}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
       ) : null}
-      {view.name === "new-trip" ? <NewTrip onBack={() => setView({ name: "home" })} onSave={addTrip} /> : null}
+      {view.name === "new-trip" ? (
+        <NewTrip onBack={() => setView({ name: "home" })} onSave={addTrip} theme={theme} onToggleTheme={toggleTheme} />
+      ) : null}
       {view.name === "trip" ? (
         <TripDetail
           trip={trips.find((trip) => trip.id === view.tripId)}
           onBack={() => setView({ name: "home" })}
           onAddPhotos={(photos) => appendPhotos(view.tripId, photos)}
           onUpdatePhoto={(photoId, next) => updatePhoto(view.tripId, photoId, next)}
+          onDeletePhoto={(photoId) => deletePhoto(view.tripId, photoId)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       ) : null}
     </div>
   );
 }
 
-function Home({ trips, onAdd, onOpen }: { trips: TripRecord[]; onAdd: () => void; onOpen: (tripId: string) => void }) {
+function Home({
+  trips,
+  onAdd,
+  onOpen,
+  theme,
+  onToggleTheme,
+}: {
+  trips: TripRecord[];
+  onAdd: () => void;
+  onOpen: (tripId: string) => void;
+} & ThemeProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <main className="screen home-screen">
       <header className="topbar">
         <span className="wordmark">journoid</span>
-        <VersionMark />
-        <button className="icon-button" type="button" onClick={onAdd} aria-label="새 여행 추가"><PlusIcon /></button>
+        <div className="topbar-actions">
+          <button className="icon-button" type="button" onClick={onAdd} aria-label="새 여행 추가"><PlusIcon /></button>
+          <MenuButton open={menuOpen} onClick={() => setMenuOpen((current) => !current)} />
+        </div>
       </header>
+
+      <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
 
       {trips.length === 0 ? (
         <section className="home-empty">
@@ -319,24 +448,18 @@ function Home({ trips, onAdd, onOpen }: { trips: TripRecord[]; onAdd: () => void
           <button className="text-action" type="button" onClick={onAdd}>첫 여행 추가</button>
         </section>
       ) : (
-        <>
-          <section className="home-masthead">
-            <h1>여행</h1>
-            <span>{String(trips.length).padStart(2, "0")}</span>
-          </section>
-          <section className="journey-list" aria-label="여행 목록">
-            {trips.map((trip, index) => (
-              <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
-                <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
-                <div className="journey-copy">
-                  <strong>{tripTitle(trip.city, trip.startDate)}</strong>
-                  <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
-                </div>
-                <TripPreview trip={trip} />
-              </button>
-            ))}
-          </section>
-        </>
+        <section className="journey-list" aria-label="여행 목록">
+          {trips.map((trip, index) => (
+            <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
+              <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
+              <div className="journey-copy">
+                <strong>{tripTitle(trip.city, trip.startDate)}</strong>
+                <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+              </div>
+              <TripPreview trip={trip} />
+            </button>
+          ))}
+        </section>
       )}
     </main>
   );
@@ -360,11 +483,20 @@ function TripPreview({ trip }: { trip: TripRecord }) {
   );
 }
 
-function NewTrip({ onBack, onSave }: { onBack: () => void; onSave: (city: string, startDate: string, endDate: string) => void }) {
+function NewTrip({
+  onBack,
+  onSave,
+  theme,
+  onToggleTheme,
+}: {
+  onBack: () => void;
+  onSave: (city: string, startDate: string, endDate: string) => void;
+} & ThemeProps) {
   const [city, setCity] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
   const title = tripTitle(city, startDate);
 
   const save = () => {
@@ -377,9 +509,12 @@ function NewTrip({ onBack, onSave }: { onBack: () => void; onSave: (city: string
     <main className="screen form-screen">
       <header className="topbar">
         <button className="icon-button" type="button" onClick={onBack} aria-label="뒤로"><ArrowLeftIcon /></button>
-        <VersionMark />
-        <button className="icon-button" type="button" onClick={save} aria-label="저장"><CheckIcon /></button>
+        <div className="topbar-actions">
+          <button className="icon-button" type="button" onClick={save} aria-label="저장"><CheckIcon /></button>
+          <MenuButton open={menuOpen} onClick={() => setMenuOpen((current) => !current)} />
+        </div>
       </header>
+      <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
       <section className="trip-form">
         <h1>{title || "새 여행"}</h1>
         <label>
@@ -407,13 +542,18 @@ function TripDetail({
   onBack,
   onAddPhotos,
   onUpdatePhoto,
+  onDeletePhoto,
+  theme,
+  onToggleTheme,
 }: {
   trip?: TripRecord;
   onBack: () => void;
   onAddPhotos: (photos: PhotoRecord[]) => void;
   onUpdatePhoto: (photoId: string, next: PhotoUpdate) => void;
-}) {
+  onDeletePhoto: (photoId: string) => void;
+} & ThemeProps) {
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
@@ -449,12 +589,15 @@ function TripDetail({
       <main className="screen trip-screen">
         <header className="topbar sticky-topbar">
           <button className="icon-button" type="button" onClick={onBack} aria-label="여행 목록"><ArrowLeftIcon /></button>
-          <VersionMark />
-          <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
-            <ImageIcon />
-            <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
-          </label>
+          <div className="topbar-actions">
+            <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
+              <ImageIcon />
+              <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
+            </label>
+            <MenuButton open={menuOpen} onClick={() => setMenuOpen((current) => !current)} />
+          </div>
         </header>
+        <SettingsMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme={theme} onToggleTheme={onToggleTheme} />
         <section className="trip-heading">
           <span className="trip-eyebrow">{tripMonth(trip.startDate)}월의</span>
           <h1>{trip.city}</h1>
@@ -515,6 +658,9 @@ function TripDetail({
           photo={selectedPhoto}
           onClose={() => setSelectedPhotoId(null)}
           onSave={(next) => onUpdatePhoto(selectedPhoto.id, next)}
+          onDelete={() => { onDeletePhoto(selectedPhoto.id); setSelectedPhotoId(null); }}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
         />
       ) : null}
     </>
@@ -540,17 +686,22 @@ function PhotoViewer({
   photo,
   onClose,
   onSave,
+  onDelete,
+  theme,
+  onToggleTheme,
 }: {
   photo: PhotoRecord;
   onClose: () => void;
   onSave: (next: PhotoUpdate) => void;
-}) {
+  onDelete: () => void;
+} & ThemeProps) {
   const [mode, setMode] = useState<"model" | "edit">("model");
   const [rotation, setRotation] = useState({ x: -5, y: -16 });
   const [caption, setCaption] = useState(photo.caption);
   const [drawing, setDrawing] = useState(photo.drawing ?? "");
   const [frameColor, setFrameColor] = useState(photo.frameColor ?? DEFAULT_FRAME_COLOR);
   const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
   const drawingExporterRef = useRef<(() => Promise<string>) | null>(null);
 
@@ -605,9 +756,19 @@ function PhotoViewer({
         <button className="icon-button" type="button" onClick={mode === "edit" ? () => setMode("model") : onClose} aria-label={mode === "edit" ? "모델로 돌아가기" : "닫기"}>
           {mode === "edit" ? <ArrowLeftIcon /> : <Cross1Icon />}
         </button>
-        <VersionMark />
-        {mode === "edit" ? <button className="save-text-button" type="button" onClick={save} disabled={saving}>저장</button> : null}
+        <div className="topbar-actions">
+          {mode === "edit" ? <button className="save-text-button" type="button" onClick={save} disabled={saving}>저장</button> : null}
+          <MenuButton open={menuOpen} onClick={() => setMenuOpen((current) => !current)} />
+        </div>
       </header>
+
+      <SettingsMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        onDeletePhoto={onDelete}
+      />
 
       {mode === "model" ? (
         <div className="model-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }}>

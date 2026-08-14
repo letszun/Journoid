@@ -21,7 +21,10 @@
 - Batch photo imports use a dedicated full-screen progress view. Keep the underlying gallery out of sight until the responsive two-file batch pipeline has finished.
 - Persist the full journal, including image and drawing data, in the `journoid` IndexedDB database. Keep `journoid.storage` as the permanent unversioned local-storage pointer, automatically migrate `journoid-trips-v2` and `journey-polaroid-trips-v1`, and use `journoid.trips` only as a fallback when IndexedDB is unavailable.
 - Keep drawing input low-latency: never synchronously encode PNG data at pointer-down, collect coalesced pointer samples, smooth pressure, render the active stroke on a separate canvas, and composite translucent marker strokes only once so segment joins do not form dark dots.
-- Show the current semantic `APP_VERSION` in every app header. Increment it for each published update and record user-visible changes in `CHANGELOG.md` so a home-screen installation can be checked against the latest deployment.
+- Keep the home collection free of redundant masthead copy such as `여행`; the journal rows should begin directly below the compact app header.
+- Put the current semantic `APP_VERSION` inside the three-dot settings menu instead of displaying it in headers. Increment it for each published update and record user-visible changes in `CHANGELOG.md` so a home-screen installation can be checked against the latest deployment.
+- Offer a persistent monochrome dark theme from the three-dot settings menu and store the preference at the stable `journoid.theme` local-storage key.
+- Photo deletion belongs in the full-screen photo detail menu and must require an explicit confirmation before removing the IndexedDB-backed record.
 
 ## Current Runtime Override
 
