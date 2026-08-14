@@ -13,6 +13,9 @@
 - The current visual language is monochrome editorial: oversized numerals and Korean display type, deconstructed alignment, hard rules, square controls, and staggered photo grids. Avoid generic rounded cards and soft lifestyle-app styling.
 - Photo windows use the iPhone camera's default portrait orientation, `3:4`, across list, preview, 3D model, and doodle editor surfaces.
 - Batch imports must stay responsive beyond five files: process at most two images concurrently, append completed batches immediately, encode asynchronously, yield between batches, and debounce local-storage serialization.
+- The gallery is photo-first and grid-aligned: use a 4px base unit, 16px mobile gutters, 40px primary controls, 18px line icons, and 1px neutral rules. Do not use drop shadows, random rotations, staggered rows, or oversized date typography around the polaroids.
+- Use deliberate Helvetica/Pretendard typography: display tracking around `-0.055em`, body tracking around `-0.012em`, compact display leading around `0.94`, and readable body leading around `1.45–1.5`. Align labels, counts, and titles to shared left and baseline anchors.
+- The doodle editor supports 1×–3× zoom, two-finger pinch, and panning with the move tool. Frame color changes are saved per photo; the default UI stays monochrome while a custom color picker remains available.
 
 ## Current Runtime Override
 

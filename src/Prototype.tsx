@@ -10,13 +10,17 @@ import {
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ColorWheelIcon,
   Cross1Icon,
   ImageIcon,
   MinusIcon,
+  MoveIcon,
   Pencil1Icon,
   PlusIcon,
   ResetIcon,
   TrashIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "@radix-ui/react-icons";
 
 type PhotoRecord = {
@@ -26,7 +30,10 @@ type PhotoRecord = {
   capturedAt: string;
   caption: string;
   drawing?: string;
+  frameColor?: string;
 };
+
+type PhotoUpdate = Pick<PhotoRecord, "caption" | "drawing" | "frameColor">;
 
 type TripRecord = {
   id: string;
@@ -53,6 +60,8 @@ type PhotoGroup = {
 
 const STORAGE_KEY = "journoid-trips-v2";
 const LEGACY_STORAGE_KEY = "journey-polaroid-trips-v1";
+const DEFAULT_FRAME_COLOR = "#ffffff";
+const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 
 function readSavedTrips(): TripRecord[] {
   try {
@@ -143,7 +152,7 @@ export default function Prototype() {
     )));
   };
 
-  const updatePhoto = (tripId: string, photoId: string, next: Pick<PhotoRecord, "caption" | "drawing">) => {
+  const updatePhoto = (tripId: string, photoId: string, next: PhotoUpdate) => {
     setTrips((current) => current.map((trip) => (
       trip.id === tripId
         ? { ...trip, photos: trip.photos.map((photo) => photo.id === photoId ? { ...photo, ...next } : photo) }
@@ -211,7 +220,11 @@ function TripPreview({ trip }: { trip: TripRecord }) {
   return (
     <span className="preview-stack" aria-label={`${trip.photos.length}장의 사진`}>
       {trip.photos.slice(-2).map((photo, index) => (
-        <span className="preview-polaroid" key={photo.id} style={{ "--preview-index": index } as CSSProperties}>
+        <span
+          className="preview-polaroid"
+          key={photo.id}
+          style={{ "--preview-index": index, "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR } as CSSProperties}
+        >
           <img src={photo.dataUrl} alt="" />
           {photo.drawing ? <img className="drawing-layer" src={photo.drawing} alt="" /> : null}
         </span>
@@ -270,7 +283,7 @@ function TripDetail({
   trip?: TripRecord;
   onBack: () => void;
   onAddPhotos: (photos: PhotoRecord[]) => void;
-  onUpdatePhoto: (photoId: string, next: Pick<PhotoRecord, "caption" | "drawing">) => void;
+  onUpdatePhoto: (photoId: string, next: PhotoUpdate) => void;
 }) {
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -339,12 +352,12 @@ function TripDetail({
                   <div className="period" key={`${group.key}-${period.label}`}>
                     <span className="period-label">{period.label}</span>
                     <div className="polaroid-grid">
-                      {period.photos.map((photo, index) => (
+                      {period.photos.map((photo) => (
                         <article className="polaroid-entry" key={photo.id}>
                           <button
                             className="flat-polaroid"
                             type="button"
-                            style={{ "--tilt": `${[-1.25, 0.75, -0.4, 1.1][index % 4]}deg` } as CSSProperties}
+                            style={{ "--frame-color": photo.frameColor ?? DEFAULT_FRAME_COLOR } as CSSProperties}
                             onClick={() => setSelectedPhotoId(photo.id)}
                             aria-label="폴라로이드 열기"
                           >
@@ -383,12 +396,13 @@ function PhotoViewer({
 }: {
   photo: PhotoRecord;
   onClose: () => void;
-  onSave: (next: Pick<PhotoRecord, "caption" | "drawing">) => void;
+  onSave: (next: PhotoUpdate) => void;
 }) {
   const [mode, setMode] = useState<"model" | "edit">("model");
   const [rotation, setRotation] = useState({ x: -5, y: -16 });
   const [caption, setCaption] = useState(photo.caption);
   const [drawing, setDrawing] = useState(photo.drawing ?? "");
+  const [frameColor, setFrameColor] = useState(photo.frameColor ?? DEFAULT_FRAME_COLOR);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
 
   useEffect(() => {
@@ -419,7 +433,7 @@ function PhotoViewer({
   };
 
   const save = () => {
-    onSave({ caption: caption.trim(), drawing: drawing || undefined });
+    onSave({ caption: caption.trim(), drawing: drawing || undefined, frameColor });
     setMode("model");
   };
 
@@ -434,7 +448,13 @@ function PhotoViewer({
 
       {mode === "model" ? (
         <div className="model-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }}>
-          <div className="polaroid-model" style={{ transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)` }}>
+          <div
+            className="polaroid-model"
+            style={{
+              "--frame-color": frameColor,
+              transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+            } as CSSProperties}
+          >
             <div className="model-face model-front">
               <ModelPhoto photo={photo} drawing={drawing} />
             </div>
@@ -444,7 +464,15 @@ function PhotoViewer({
           </div>
         </div>
       ) : (
-        <PhotoEditor photo={photo} drawing={drawing} onDrawingChange={setDrawing} caption={caption} onCaptionChange={setCaption} />
+        <PhotoEditor
+          photo={photo}
+          drawing={drawing}
+          onDrawingChange={setDrawing}
+          caption={caption}
+          onCaptionChange={setCaption}
+          frameColor={frameColor}
+          onFrameColorChange={setFrameColor}
+        />
       )}
     </div>
   );
@@ -459,24 +487,59 @@ function ModelPhoto({ photo, drawing }: { photo: PhotoRecord; drawing: string })
   );
 }
 
+type EditorGesture =
+  | { kind: "draw"; pointerId: number }
+  | { kind: "pan"; pointerId: number; start: { x: number; y: number }; pan: { x: number; y: number } }
+  | {
+    kind: "pinch";
+    pointerIds: [number, number];
+    distance: number;
+    zoom: number;
+    contentPoint: { x: number; y: number };
+  };
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function pointerDistance(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function pointerMidpoint(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
 function PhotoEditor({
   photo,
   drawing,
   onDrawingChange,
   caption,
   onCaptionChange,
+  frameColor,
+  onFrameColorChange,
 }: {
   photo: PhotoRecord;
   drawing: string;
   onDrawingChange: (value: string) => void;
   caption: string;
   onCaptionChange: (value: string) => void;
+  frameColor: string;
+  onFrameColorChange: (value: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const editorPhotoRef = useRef<HTMLDivElement>(null);
   const [brushSize, setBrushSize] = useState(4);
+  const [tool, setTool] = useState<"draw" | "move">("draw");
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
   const drawingRef = useRef(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
   const history = useRef<string[]>([]);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<EditorGesture | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -490,27 +553,71 @@ function PhotoEditor({
     image.src = drawing;
   }, [drawing]);
 
-  const pointFor = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
+  const clampPan = (next: { x: number; y: number }, nextZoom = zoomRef.current) => {
+    const rect = editorPhotoRef.current?.getBoundingClientRect();
+    if (!rect || nextZoom <= 1) return { x: 0, y: 0 };
+    const maxX = (rect.width * (nextZoom - 1)) / 2;
+    const maxY = (rect.height * (nextZoom - 1)) / 2;
+    return { x: clamp(next.x, -maxX, maxX), y: clamp(next.y, -maxY, maxY) };
+  };
+
+  const updatePan = (next: { x: number; y: number }, nextZoom = zoomRef.current) => {
+    const bounded = clampPan(next, nextZoom);
+    panRef.current = bounded;
+    setPan(bounded);
+  };
+
+  const updateZoom = (next: number) => {
+    const bounded = clamp(next, 1, 3);
+    zoomRef.current = bounded;
+    setZoom(bounded);
+    updatePan(panRef.current, bounded);
+    if (bounded === 1) setTool("draw");
+  };
+
+  const resetView = () => {
+    zoomRef.current = 1;
+    panRef.current = { x: 0, y: 0 };
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setTool("draw");
+  };
+
+  const pointFor = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    const rect = editorPhotoRef.current?.getBoundingClientRect();
+    if (!canvas || !rect) return { x: 0, y: 0 };
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const localX = ((clientX - rect.left - centerX - panRef.current.x) / zoomRef.current) + centerX;
+    const localY = ((clientY - rect.top - centerY - panRef.current.y) / zoomRef.current) + centerY;
     return {
-      x: (event.clientX - rect.left) * (event.currentTarget.width / rect.width),
-      y: (event.clientY - rect.top) * (event.currentTarget.height / rect.height),
+      x: clamp(localX / rect.width, 0, 1) * canvas.width,
+      y: clamp(localY / rect.height, 0, 1) * canvas.height,
     };
   };
 
-  const start = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    history.current.push(canvasRef.current?.toDataURL() ?? "");
-    drawingRef.current = true;
-    lastPoint.current = pointFor(event);
-    event.currentTarget.setPointerCapture(event.pointerId);
+  const finishDrawing = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    lastPoint.current = null;
+    onDrawingChange(canvasRef.current?.toDataURL("image/png") ?? "");
   };
 
-  const move = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+  const startDrawing = (event: ReactPointerEvent<HTMLDivElement>) => {
+    history.current.push(canvasRef.current?.toDataURL() ?? "");
+    drawingRef.current = true;
+    lastPoint.current = pointFor(event.clientX, event.clientY);
+    gesture.current = { kind: "draw", pointerId: event.pointerId };
+  };
+
+  const moveDrawing = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drawingRef.current || !lastPoint.current) return;
-    const canvas = event.currentTarget;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
-    const point = pointFor(event);
+    const point = pointFor(event.clientX, event.clientY);
     context.strokeStyle = "#111111";
     context.lineWidth = brushSize;
     context.lineCap = "round";
@@ -522,11 +629,84 @@ function PhotoEditor({
     lastPoint.current = point;
   };
 
-  const end = () => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    lastPoint.current = null;
-    onDrawingChange(canvasRef.current?.toDataURL("image/png") ?? "");
+  const beginPinch = () => {
+    const entries = Array.from(pointers.current.entries());
+    if (entries.length < 2) return;
+    finishDrawing();
+    const [[firstId, first], [secondId, second]] = entries;
+    const rect = editorPhotoRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const midpoint = pointerMidpoint(first, second);
+    const focus = { x: midpoint.x - rect.left - rect.width / 2, y: midpoint.y - rect.top - rect.height / 2 };
+    gesture.current = {
+      kind: "pinch",
+      pointerIds: [firstId, secondId],
+      distance: Math.max(1, pointerDistance(first, second)),
+      zoom: zoomRef.current,
+      contentPoint: {
+        x: (focus.x - panRef.current.x) / zoomRef.current,
+        y: (focus.y - panRef.current.y) / zoomRef.current,
+      },
+    };
+  };
+
+  const pointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size >= 2) {
+      beginPinch();
+      return;
+    }
+    if (tool === "move") {
+      gesture.current = {
+        kind: "pan",
+        pointerId: event.pointerId,
+        start: { x: event.clientX, y: event.clientY },
+        pan: panRef.current,
+      };
+      return;
+    }
+    startDrawing(event);
+  };
+
+  const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.has(event.pointerId)) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const currentGesture = gesture.current;
+    if (!currentGesture) return;
+    if (currentGesture.kind === "pinch") {
+      const first = pointers.current.get(currentGesture.pointerIds[0]);
+      const second = pointers.current.get(currentGesture.pointerIds[1]);
+      const rect = editorPhotoRef.current?.getBoundingClientRect();
+      if (!first || !second || !rect) return;
+      const nextZoom = clamp(currentGesture.zoom * (pointerDistance(first, second) / currentGesture.distance), 1, 3);
+      const midpoint = pointerMidpoint(first, second);
+      const focus = { x: midpoint.x - rect.left - rect.width / 2, y: midpoint.y - rect.top - rect.height / 2 };
+      zoomRef.current = nextZoom;
+      setZoom(nextZoom);
+      updatePan({
+        x: focus.x - currentGesture.contentPoint.x * nextZoom,
+        y: focus.y - currentGesture.contentPoint.y * nextZoom,
+      }, nextZoom);
+      return;
+    }
+    if (currentGesture.kind === "pan" && currentGesture.pointerId === event.pointerId) {
+      updatePan({
+        x: currentGesture.pan.x + event.clientX - currentGesture.start.x,
+        y: currentGesture.pan.y + event.clientY - currentGesture.start.y,
+      });
+      return;
+    }
+    if (currentGesture.kind === "draw" && currentGesture.pointerId === event.pointerId) moveDrawing(event);
+  };
+
+  const pointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentGesture = gesture.current;
+    if (currentGesture?.kind === "draw" && currentGesture.pointerId === event.pointerId) finishDrawing();
+    pointers.current.delete(event.pointerId);
+    if (currentGesture?.kind !== "pinch" || pointers.current.size < 2) gesture.current = null;
   };
 
   const undo = () => {
@@ -541,28 +721,60 @@ function PhotoEditor({
 
   return (
     <div className="editor-page">
-      <div className="editor-polaroid">
-        <div className="editor-photo">
-          <img src={photo.dataUrl} alt="편집할 여행 사진" />
-          <canvas
-            ref={canvasRef}
-            width="900"
-            height="1200"
-            onPointerDown={start}
-            onPointerMove={move}
-            onPointerUp={end}
-            onPointerCancel={end}
-            aria-label="사진 위에 낙서하기"
-          />
+      <div className="editor-polaroid" style={{ "--frame-color": frameColor } as CSSProperties}>
+        <div
+          ref={editorPhotoRef}
+          className={`editor-photo ${tool === "move" ? "is-panning" : "is-drawing"}`}
+          onPointerDown={pointerDown}
+          onPointerMove={pointerMove}
+          onPointerUp={pointerEnd}
+          onPointerCancel={pointerEnd}
+          onDoubleClick={() => { if (zoomRef.current === 1) updateZoom(2); else resetView(); }}
+        >
+          <div
+            className="editor-zoom-surface"
+            style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
+          >
+            <img src={photo.dataUrl} alt="편집할 여행 사진" />
+            <canvas ref={canvasRef} width="900" height="1200" aria-label="사진 위에 낙서하기" />
+          </div>
         </div>
       </div>
-      <div className="drawing-tools" aria-label="낙서 도구">
-        <button type="button" onClick={() => setBrushSize((size) => Math.max(2, size - 2))} aria-label="펜 가늘게"><MinusIcon /></button>
-        <span className="brush-preview" style={{ width: brushSize + 4, height: brushSize + 4 }} />
-        <button type="button" onClick={() => setBrushSize((size) => Math.min(14, size + 2))} aria-label="펜 굵게"><PlusIcon /></button>
-        <span className="tool-divider" />
-        <button type="button" onClick={undo} aria-label="되돌리기"><ResetIcon /></button>
-        <button type="button" onClick={clear} aria-label="낙서 지우기"><TrashIcon /></button>
+      <div className="editor-controls">
+        <div className="drawing-tools" aria-label="낙서 도구">
+          <button className={tool === "draw" ? "is-active" : ""} type="button" onClick={() => setTool("draw")} aria-label="펜" aria-pressed={tool === "draw"}><Pencil1Icon /></button>
+          <button className={tool === "move" ? "is-active" : ""} type="button" onClick={() => setTool("move")} aria-label="확대한 사진 이동" aria-pressed={tool === "move"} disabled={zoom <= 1}><MoveIcon /></button>
+          <span className="tool-divider" />
+          <button type="button" onClick={() => setBrushSize((size) => Math.max(2, size - 2))} aria-label="펜 가늘게"><MinusIcon /></button>
+          <span className="brush-preview" style={{ width: brushSize + 4, height: brushSize + 4 }} />
+          <button type="button" onClick={() => setBrushSize((size) => Math.min(14, size + 2))} aria-label="펜 굵게"><PlusIcon /></button>
+          <span className="tool-divider" />
+          <button type="button" onClick={undo} aria-label="되돌리기"><ResetIcon /></button>
+          <button type="button" onClick={clear} aria-label="낙서 지우기"><TrashIcon /></button>
+        </div>
+        <div className="zoom-tools" aria-label="사진 확대 도구">
+          <button type="button" onClick={() => updateZoom(zoomRef.current - 0.25)} aria-label="축소" disabled={zoom <= 1}><ZoomOutIcon /></button>
+          <button className="zoom-readout" type="button" onClick={resetView} aria-label="확대 초기화">{Math.round(zoom * 100)}%</button>
+          <button type="button" onClick={() => updateZoom(zoomRef.current + 0.25)} aria-label="확대" disabled={zoom >= 3}><ZoomInIcon /></button>
+        </div>
+      </div>
+      <div className="frame-colors" aria-label="폴라로이드 프레임 색상">
+        <ColorWheelIcon aria-hidden="true" />
+        {FRAME_COLORS.map((color) => (
+          <button
+            className="frame-swatch"
+            type="button"
+            key={color}
+            style={{ "--swatch": color } as CSSProperties}
+            onClick={() => onFrameColorChange(color)}
+            aria-label={`프레임 색상 ${color}`}
+            aria-pressed={frameColor.toLowerCase() === color}
+          />
+        ))}
+        <label className="frame-color-custom" aria-label="사용자 지정 프레임 색상">
+          <PlusIcon />
+          <input type="color" value={frameColor} onChange={(event) => onFrameColorChange(event.target.value)} />
+        </label>
       </div>
       <label className="comment-editor">
         <Pencil1Icon />
@@ -580,6 +792,7 @@ async function toPhotoRecord(file: File): Promise<PhotoRecord> {
     dataUrl: await resizeImage(file),
     capturedAt: capturedAt.toISOString(),
     caption: "",
+    frameColor: DEFAULT_FRAME_COLOR,
   };
 }
 
