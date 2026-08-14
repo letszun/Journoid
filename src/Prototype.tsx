@@ -60,8 +60,13 @@ type PhotoGroup = {
   periods: { label: string; photos: PhotoRecord[] }[];
 };
 
-const STORAGE_KEY = "journoid-trips-v2";
-const LEGACY_STORAGE_KEY = "journey-polaroid-trips-v1";
+const STORAGE_POINTER_KEY = "journoid.storage";
+const LOCAL_FALLBACK_KEY = "journoid.trips";
+const LEGACY_STORAGE_KEYS = ["journoid-trips-v2", "journey-polaroid-trips-v1"];
+const DATABASE_NAME = "journoid";
+const DATABASE_VERSION = 1;
+const TRIPS_STORE = "journal";
+const TRIPS_RECORD_KEY = "trips";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
 const DEFAULT_DRAWING_COLOR = "#111111";
@@ -69,12 +74,110 @@ const DRAWING_COLORS = ["#111111", "#ffffff", "#ff453a", "#0a84ff", "#ffd60a"];
 
 type BrushKind = "pen" | "pencil" | "marker";
 
-function readSavedTrips(): TripRecord[] {
+type TripsStorageRecord = {
+  id: typeof TRIPS_RECORD_KEY;
+  schemaVersion: 1;
+  updatedAt: string;
+  trips: TripRecord[];
+};
+
+let storageWriteQueue = Promise.resolve();
+
+function openStorageDatabase() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("IndexedDB unavailable"));
+      return;
+    }
+    const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(TRIPS_STORE)) {
+        request.result.createObjectStore(TRIPS_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open storage"));
+    request.onblocked = () => reject(new Error("Storage upgrade blocked"));
+  });
+}
+
+async function readIndexedTrips() {
+  const database = await openStorageDatabase();
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    return saved ? (JSON.parse(saved) as TripRecord[]) : [];
+    return await new Promise<TripRecord[] | null>((resolve, reject) => {
+      const transaction = database.transaction(TRIPS_STORE, "readonly");
+      const request = transaction.objectStore(TRIPS_STORE).get(TRIPS_RECORD_KEY);
+      request.onsuccess = () => resolve((request.result as TripsStorageRecord | undefined)?.trips ?? null);
+      request.onerror = () => reject(request.error ?? new Error("Could not read trips"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Storage read aborted"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function writeIndexedTrips(trips: TripRecord[]) {
+  const database = await openStorageDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(TRIPS_STORE, "readwrite");
+      const record: TripsStorageRecord = {
+        id: TRIPS_RECORD_KEY,
+        schemaVersion: 1,
+        updatedAt: new Date().toISOString(),
+        trips,
+      };
+      transaction.objectStore(TRIPS_STORE).put(record);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Could not save trips"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Storage write aborted"));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function readLocalTrips() {
+  for (const key of [LOCAL_FALLBACK_KEY, ...LEGACY_STORAGE_KEYS]) {
+    try {
+      const saved = window.localStorage.getItem(key);
+      if (!saved) continue;
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed as TripRecord[];
+    } catch {
+      // Try the next known key if an older entry is incomplete.
+    }
+  }
+  return [];
+}
+
+async function readSavedTrips() {
+  try {
+    const indexedTrips = await readIndexedTrips();
+    if (indexedTrips) return indexedTrips;
   } catch {
-    return [];
+    // Fall through to the local-storage migration path.
+  }
+
+  const localTrips = readLocalTrips();
+  if (localTrips.length) await persistTrips(localTrips);
+  return localTrips;
+}
+
+async function persistTrips(trips: TripRecord[]) {
+  try {
+    await writeIndexedTrips(trips);
+    window.localStorage.setItem(STORAGE_POINTER_KEY, JSON.stringify({
+      driver: "indexedDB",
+      database: DATABASE_NAME,
+      schemaVersion: DATABASE_VERSION,
+    }));
+  } catch {
+    try {
+      window.localStorage.setItem(LOCAL_FALLBACK_KEY, JSON.stringify(trips));
+    } catch {
+      // The in-memory session remains usable even when all browser storage is unavailable.
+    }
   }
 }
 
@@ -124,19 +227,29 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
 }
 
 export default function Prototype() {
-  const [trips, setTrips] = useState<TripRecord[]>(readSavedTrips);
+  const [trips, setTrips] = useState<TripRecord[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
   const [view, setView] = useState<View>({ name: "home" });
 
   useEffect(() => {
+    let active = true;
+    void readSavedTrips().then((savedTrips) => {
+      if (!active) return;
+      setTrips(savedTrips);
+      setStorageReady(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
     const saveTimer = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
-      } catch {
-        // Keep the current session usable if browser storage is full.
-      }
+      storageWriteQueue = storageWriteQueue
+        .catch(() => undefined)
+        .then(() => persistTrips(trips));
     }, 650);
     return () => window.clearTimeout(saveTimer);
-  }, [trips]);
+  }, [storageReady, trips]);
 
   const addTrip = (city: string, startDate: string, endDate: string) => {
     const id = `trip-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
@@ -165,6 +278,8 @@ export default function Prototype() {
         : trip
     )));
   };
+
+  if (!storageReady) return <div className="app-shell" aria-busy="true" />;
 
   return (
     <div className="app-shell">
