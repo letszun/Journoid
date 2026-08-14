@@ -55,6 +55,7 @@ type TravelStoreValue = {
 };
 
 const STORAGE_KEY = "journey-polaroid-trips-v1";
+const EMPTY_POLAROID_STACK = `${import.meta.env.BASE_URL}empty-polaroid-stack.png`;
 const TravelStoreContext = createContext<TravelStoreValue | null>(null);
 
 function useTravelStore() {
@@ -226,7 +227,7 @@ function HomeScreen({ flow }: { flow: FlowControls }) {
           <section className="empty-state" aria-labelledby="empty-title">
             <img
               className="empty-stack-image"
-              src="/empty-polaroid-stack.png"
+              src={EMPTY_POLAROID_STACK}
               alt="여행 풍경이 담긴 폴라로이드 사진 더미"
               draggable={false}
             />
@@ -415,7 +416,7 @@ function TripDetailScreen() {
 
           {trip.photos.length === 0 ? (
             <section className="photo-empty-state">
-              <img src="/empty-polaroid-stack.png" alt="겹쳐 놓은 여행 폴라로이드" draggable={false} />
+              <img src={EMPTY_POLAROID_STACK} alt="겹쳐 놓은 여행 폴라로이드" draggable={false} />
               <p>아직 사진이 없습니다.</p>
               <span>갤러리에서 불러오면 날짜와 시간대별로 나눠드려요.</span>
             </section>
