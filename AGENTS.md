@@ -10,6 +10,9 @@
 - Tapping a 2D polaroid opens a full-screen white 3D model. Tapping the model opens photo doodling and short-comment editing.
 - Use only Helvetica/Pretendard-style sans-serif typography and a neutral black, white, and gray palette. Do not use orange accent colors or decorative serif fonts.
 - Do not display the provided reference image or other copied reference imagery in the product.
+- The current visual language is monochrome editorial: oversized numerals and Korean display type, deconstructed alignment, hard rules, square controls, and staggered photo grids. Avoid generic rounded cards and soft lifestyle-app styling.
+- Photo windows use the iPhone camera's default portrait orientation, `3:4`, across list, preview, 3D model, and doodle editor surfaces.
+- Batch imports must stay responsive beyond five files: process at most two images concurrently, append completed batches immediately, encode asynchronously, yield between batches, and debounce local-storage serialization.
 
 ## Current Runtime Override
 

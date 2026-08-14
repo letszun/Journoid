@@ -44,8 +44,10 @@ type View =
 
 type PhotoGroup = {
   key: string;
-  dateLabel: string;
+  day: string;
+  month: string;
   weekday: string;
+  count: number;
   periods: { label: string; photos: PhotoRecord[] }[];
 };
 
@@ -65,6 +67,10 @@ function tripTitle(city: string, startDate: string) {
   if (!city.trim() || !startDate) return "";
   const month = new Date(`${startDate}T12:00:00`).getMonth() + 1;
   return `${month}월의 ${city.trim()}`;
+}
+
+function tripMonth(startDate: string) {
+  return new Date(`${startDate}T12:00:00`).getMonth() + 1;
 }
 
 function formatTripRange(startDate: string, endDate: string) {
@@ -93,8 +99,10 @@ function groupPhotos(photos: PhotoRecord[]): PhotoGroup[] {
 
     return {
       key,
-      dateLabel: new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" }).format(date),
+      day: String(date.getDate()).padStart(2, "0"),
+      month: new Intl.DateTimeFormat("ko-KR", { month: "long" }).format(date),
       weekday: new Intl.DateTimeFormat("ko-KR", { weekday: "short" }).format(date),
+      count: dayPhotos.length,
       periods: Array.from(periodMap.entries()).map(([label, periodPhotos]) => ({ label, photos: periodPhotos })),
     };
   });
@@ -105,11 +113,14 @@ export default function Prototype() {
   const [view, setView] = useState<View>({ name: "home" });
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
-    } catch {
-      // Keep the current session usable if browser storage is full.
-    }
+    const saveTimer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trips));
+      } catch {
+        // Keep the current session usable if browser storage is full.
+      }
+    }, 650);
+    return () => window.clearTimeout(saveTimer);
   }, [trips]);
 
   const addTrip = (city: string, startDate: string, endDate: string) => {
@@ -172,18 +183,24 @@ function Home({ trips, onAdd, onOpen }: { trips: TripRecord[]; onAdd: () => void
           <button className="text-action" type="button" onClick={onAdd}>첫 여행 추가</button>
         </section>
       ) : (
-        <section className="journey-list" aria-label="여행 목록">
-          {trips.map((trip, index) => (
-            <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
-              <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
-              <div className="journey-copy">
-                <strong>{tripTitle(trip.city, trip.startDate)}</strong>
-                <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
-              </div>
-              <TripPreview trip={trip} />
-            </button>
-          ))}
-        </section>
+        <>
+          <section className="home-masthead">
+            <h1>여행</h1>
+            <span>{String(trips.length).padStart(2, "0")}</span>
+          </section>
+          <section className="journey-list" aria-label="여행 목록">
+            {trips.map((trip, index) => (
+              <button className="journey-row" type="button" key={trip.id} onClick={() => onOpen(trip.id)}>
+                <div className="journey-index">{String(index + 1).padStart(2, "0")}</div>
+                <div className="journey-copy">
+                  <strong>{tripTitle(trip.city, trip.startDate)}</strong>
+                  <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+                </div>
+                <TripPreview trip={trip} />
+              </button>
+            ))}
+          </section>
+        </>
       )}
     </main>
   );
@@ -257,6 +274,7 @@ function TripDetail({
 }) {
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
 
   const selectedPhoto = trip?.photos.find((photo) => photo.id === selectedPhotoId) ?? null;
@@ -269,8 +287,16 @@ function TripDetail({
     event.target.value = "";
     if (!files.length) return;
     setUploading(true);
+    setUploadProgress({ done: 0, total: files.length });
     try {
-      onAddPhotos(await Promise.all(files.map(toPhotoRecord)));
+      let done = 0;
+      for (let index = 0; index < files.length; index += 2) {
+        const batch = await Promise.all(files.slice(index, index + 2).map(toPhotoRecord));
+        onAddPhotos(batch);
+        done += batch.length;
+        setUploadProgress({ done, total: files.length });
+        await yieldToBrowser();
+      }
     } finally {
       setUploading(false);
     }
@@ -282,13 +308,17 @@ function TripDetail({
         <header className="topbar sticky-topbar">
           <button className="icon-button" type="button" onClick={onBack} aria-label="여행 목록"><ArrowLeftIcon /></button>
           <label className={`icon-button import-button ${uploading ? "is-loading" : ""}`} aria-label="사진 추가">
-            <ImageIcon />
+            {uploading ? <span className="upload-progress">{uploadProgress.done}/{uploadProgress.total}</span> : <ImageIcon />}
             <input ref={fileInput} type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} onClick={(event) => { event.currentTarget.value = ""; }} />
           </label>
         </header>
         <section className="trip-heading">
-          <h1>{tripTitle(trip.city, trip.startDate)}</h1>
-          <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+          <span className="trip-eyebrow">{tripMonth(trip.startDate)}월의</span>
+          <h1>{trip.city}</h1>
+          <div className="trip-meta">
+            <span>{formatTripRange(trip.startDate, trip.endDate)}</span>
+            <span>{String(trip.photos.length).padStart(2, "0")}</span>
+          </div>
         </section>
 
         {trip.photos.length === 0 ? (
@@ -300,7 +330,11 @@ function TripDetail({
           <div className="timeline">
             {groups.map((group) => (
               <section className="date-section" key={group.key}>
-                <header><strong>{group.dateLabel}</strong><span>{group.weekday}</span></header>
+                <header className="date-heading">
+                  <strong className="date-number">{group.day}</strong>
+                  <span className="date-meta"><b>{group.month}</b>{group.weekday}</span>
+                  <span className="date-count">{String(group.count).padStart(2, "0")}</span>
+                </header>
                 {group.periods.map((period) => (
                   <div className="period" key={`${group.key}-${period.label}`}>
                     <span className="period-label">{period.label}</span>
@@ -310,7 +344,7 @@ function TripDetail({
                           <button
                             className="flat-polaroid"
                             type="button"
-                            style={{ "--tilt": `${[-2.1, 1.25, -0.65, 2.4][index % 4]}deg` } as CSSProperties}
+                            style={{ "--tilt": `${[-1.25, 0.75, -0.4, 1.1][index % 4]}deg` } as CSSProperties}
                             onClick={() => setSelectedPhotoId(photo.id)}
                             aria-label="폴라로이드 열기"
                           >
@@ -512,8 +546,8 @@ function PhotoEditor({
           <img src={photo.dataUrl} alt="편집할 여행 사진" />
           <canvas
             ref={canvasRef}
-            width="1000"
-            height="1000"
+            width="900"
+            height="1200"
             onPointerDown={start}
             onPointerMove={move}
             onPointerUp={end}
@@ -561,13 +595,26 @@ async function resizeImage(file: File): Promise<string> {
     if (!context) throw new Error("Canvas unavailable");
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    return canvas.toDataURL("image/jpeg", 0.76);
+    return await canvasToDataUrl(canvas);
   } catch {
     return fileToDataUrl(file);
   }
 }
 
-function fileToDataUrl(file: File) {
+function canvasToDataUrl(canvas: HTMLCanvasElement) {
+  return new Promise<string>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error("Image encoding failed"));
+      fileToDataUrl(blob).then(resolve, reject);
+    }, "image/jpeg", 0.74);
+  });
+}
+
+function yieldToBrowser() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function fileToDataUrl(file: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
