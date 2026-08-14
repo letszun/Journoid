@@ -26,6 +26,12 @@ import {
   ZoomOutIcon,
 } from "@radix-ui/react-icons";
 
+type PhotoLocation = {
+  latitude: number;
+  longitude: number;
+  source: "exif";
+};
+
 type PhotoRecord = {
   id: string;
   name: string;
@@ -35,6 +41,7 @@ type PhotoRecord = {
   drawing?: string;
   frameColor?: string;
   aspectRatio?: number;
+  location?: PhotoLocation;
 };
 
 type PhotoUpdate = Partial<Pick<PhotoRecord, "caption" | "drawing" | "frameColor" | "aspectRatio">>;
@@ -87,7 +94,7 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.7.1";
+const APP_VERSION = "0.8.0";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const DEFAULT_PHOTO_ASPECT = 3 / 4;
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
@@ -241,6 +248,13 @@ function renderedImageAspect(image: HTMLImageElement) {
 
 function isDifferentAspect(current: number | undefined, next: number) {
   return !current || Math.abs(validPhotoAspect(current) - next) > 0.001;
+}
+
+function formatPhotoLocation(location?: PhotoLocation) {
+  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return "";
+  const latitude = `${Math.abs(location.latitude).toFixed(4)}°${location.latitude >= 0 ? "N" : "S"}`;
+  const longitude = `${Math.abs(location.longitude).toFixed(4)}°${location.longitude >= 0 ? "E" : "W"}`;
+  return `${latitude} · ${longitude}`;
 }
 
 function photoPeriod(date: Date): PhotoPeriod {
@@ -825,6 +839,7 @@ function PhotoViewer({
   const [menuOpen, setMenuOpen] = useState(false);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
   const drawingExporterRef = useRef<(() => Promise<string>) | null>(null);
+  const locationLabel = formatPhotoLocation(photo.location);
 
   useEffect(() => {
     document.body.classList.add("viewer-open");
@@ -900,7 +915,12 @@ function PhotoViewer({
 
       {mode === "model" ? (
         <div className="model-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={() => { drag.current = null; }}>
-          {caption.trim() ? <p className="model-caption">{caption.trim()}</p> : null}
+          {locationLabel || caption.trim() ? (
+            <div className="model-copy">
+              {locationLabel ? <p className="model-location">{locationLabel}</p> : null}
+              {caption.trim() ? <p className="model-caption">{caption.trim()}</p> : null}
+            </div>
+          ) : null}
           <div
             className="polaroid-model"
             style={photoFrameStyle({ aspectRatio }, {
@@ -1483,7 +1503,8 @@ function PhotoEditor({
 }
 
 async function toPhotoRecord(file: File): Promise<PhotoRecord> {
-  const capturedAt = (await readExifDate(file)) ?? new Date(file.lastModified || Date.now());
+  const metadata = await readExifMetadata(file);
+  const capturedAt = metadata.capturedAt ?? new Date(file.lastModified || Date.now());
   const resized = await resizeImage(file);
   return {
     id: `photo-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`,
@@ -1493,6 +1514,7 @@ async function toPhotoRecord(file: File): Promise<PhotoRecord> {
     caption: "",
     frameColor: DEFAULT_FRAME_COLOR,
     aspectRatio: resized.aspectRatio,
+    ...(metadata.location ? { location: metadata.location } : {}),
   };
 }
 
@@ -1560,12 +1582,47 @@ function fileToDataUrl(file: Blob) {
   });
 }
 
-async function readExifDate(file: File): Promise<Date | null> {
-  if (!/jpe?g/i.test(file.type) && !/\.jpe?g$/i.test(file.name)) return null;
+type ExifMetadata = {
+  capturedAt: Date | null;
+  location?: PhotoLocation;
+};
+
+type TiffEntry = {
+  entryOffset: number;
+  type: number;
+  count: number;
+};
+
+const EMPTY_EXIF_METADATA: ExifMetadata = { capturedAt: null };
+const EXIF_SCAN_LIMIT = 1024 * 1024;
+
+async function readExifMetadata(file: File): Promise<ExifMetadata> {
   try {
-    const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
+    const buffer = await file.slice(0, EXIF_SCAN_LIMIT).arrayBuffer();
     const view = new DataView(buffer);
-    if (view.byteLength < 4 || view.getUint16(0, false) !== 0xffd8) return null;
+    for (const tiffStart of findExifTiffStarts(view, file)) {
+      const metadata = parseExifTiff(view, tiffStart);
+      if (metadata.capturedAt || metadata.location) return metadata;
+    }
+  } catch {
+    return EMPTY_EXIF_METADATA;
+  }
+  return EMPTY_EXIF_METADATA;
+}
+
+function isTiffStart(view: DataView, offset: number) {
+  if (offset < 0 || offset + 4 > view.byteLength) return false;
+  return (view.getUint8(offset) === 0x49 && view.getUint8(offset + 1) === 0x49 && view.getUint16(offset + 2, true) === 0x002a)
+    || (view.getUint8(offset) === 0x4d && view.getUint8(offset + 1) === 0x4d && view.getUint16(offset + 2, false) === 0x002a);
+}
+
+function findExifTiffStarts(view: DataView, file: File) {
+  const starts: number[] = [];
+  const add = (offset: number) => {
+    if (isTiffStart(view, offset) && !starts.includes(offset)) starts.push(offset);
+  };
+
+  if (view.byteLength >= 4 && view.getUint16(0, false) === 0xffd8) {
     let offset = 2;
     while (offset + 4 < view.byteLength) {
       const marker = view.getUint16(offset, false);
@@ -1575,57 +1632,120 @@ async function readExifDate(file: File): Promise<Date | null> {
       if (segmentLength < 2 || offset + segmentLength > view.byteLength) break;
       if (marker === 0xffe1 && segmentLength >= 10) {
         const payload = offset + 2;
-        if (view.getUint8(payload) === 0x45 && view.getUint8(payload + 1) === 0x78 && view.getUint8(payload + 2) === 0x69 && view.getUint8(payload + 3) === 0x66) {
-          return parseExifTiff(view, payload + 6);
-        }
+        if (view.getUint8(payload) === 0x45 && view.getUint8(payload + 1) === 0x78 && view.getUint8(payload + 2) === 0x69 && view.getUint8(payload + 3) === 0x66) add(payload + 6);
       }
       offset += segmentLength;
     }
-  } catch {
-    return null;
+    return starts;
   }
-  return null;
+
+  if (view.byteLength >= 12 && view.getUint32(0, false) === 0x89504e47) {
+    let offset = 8;
+    while (offset + 12 <= view.byteLength) {
+      const length = view.getUint32(offset, false);
+      if (length > view.byteLength - offset - 12) break;
+      if (view.getUint32(offset + 4, false) === 0x65584966) add(offset + 8);
+      offset += length + 12;
+    }
+    return starts;
+  }
+
+  const containerImage = /(?:heic|heif|avif|tiff?)/i.test(`${file.type} ${file.name}`);
+  if (!containerImage) return starts;
+  add(0);
+  for (let offset = 0; offset + 4 <= view.byteLength && starts.length < 4; offset += 1) {
+    if (isTiffStart(view, offset)) add(offset);
+  }
+  return starts;
 }
 
-function parseExifTiff(view: DataView, tiffStart: number): Date | null {
-  if (tiffStart + 8 >= view.byteLength) return null;
+export function parseExifTiff(view: DataView, tiffStart: number): ExifMetadata {
+  if (tiffStart + 8 >= view.byteLength) return EMPTY_EXIF_METADATA;
   const endianMark = view.getUint16(tiffStart, false);
   const little = endianMark === 0x4949;
-  if (!little && endianMark !== 0x4d4d) return null;
+  if (!little && endianMark !== 0x4d4d) return EMPTY_EXIF_METADATA;
   const uint16 = (offset: number) => view.getUint16(offset, little);
   const uint32 = (offset: number) => view.getUint32(offset, little);
   const firstIfd = tiffStart + uint32(tiffStart + 4);
-  const readAscii = (entryOffset: number, count: number) => {
-    const start = count <= 4 ? entryOffset + 8 : tiffStart + uint32(entryOffset + 8);
-    if (start < 0 || start + count > view.byteLength) return "";
-    let value = "";
+
+  const valueOffset = (entry: TiffEntry, byteLength: number) => (
+    byteLength <= 4 ? entry.entryOffset + 8 : tiffStart + uint32(entry.entryOffset + 8)
+  );
+  const parseIfd = (ifdOffset: number, wantedTags: number[]) => {
+    if (ifdOffset < 0 || ifdOffset + 2 > view.byteLength) return new Map<number, TiffEntry>();
+    const count = Math.min(uint16(ifdOffset), 256);
+    const result = new Map<number, TiffEntry>();
     for (let index = 0; index < count; index += 1) {
+      const entry = ifdOffset + 2 + index * 12;
+      if (entry + 12 > view.byteLength) break;
+      const tag = uint16(entry);
+      if (!wantedTags.includes(tag)) continue;
+      result.set(tag, { entryOffset: entry, type: uint16(entry + 2), count: uint32(entry + 4) });
+    }
+    return result;
+  };
+
+  const readScalar = (entry?: TiffEntry) => {
+    if (!entry || entry.count < 1) return null;
+    if (entry.type === 3) return uint16(entry.entryOffset + 8);
+    if (entry.type === 4) return uint32(entry.entryOffset + 8);
+    return null;
+  };
+  const readAscii = (entry?: TiffEntry) => {
+    if (!entry || entry.type !== 2 || entry.count < 1) return "";
+    const start = valueOffset(entry, entry.count);
+    if (start < 0 || start + entry.count > view.byteLength) return "";
+    let value = "";
+    for (let index = 0; index < entry.count; index += 1) {
       const char = view.getUint8(start + index);
       if (char === 0) break;
       value += String.fromCharCode(char);
     }
     return value;
   };
-  const parseIfd = (ifdOffset: number, wantedTags: number[]) => {
-    if (ifdOffset < 0 || ifdOffset + 2 > view.byteLength) return new Map<number, { value: number; text: string }>();
-    const count = Math.min(uint16(ifdOffset), 256);
-    const result = new Map<number, { value: number; text: string }>();
-    for (let index = 0; index < count; index += 1) {
-      const entry = ifdOffset + 2 + index * 12;
-      if (entry + 12 > view.byteLength) break;
-      const tag = uint16(entry);
-      if (!wantedTags.includes(tag)) continue;
-      result.set(tag, { value: uint32(entry + 8), text: uint16(entry + 2) === 2 ? readAscii(entry, uint32(entry + 4)) : "" });
+  const readRationals = (entry?: TiffEntry) => {
+    if (!entry || entry.type !== 5 || entry.count < 1 || entry.count > 8) return [];
+    const byteLength = entry.count * 8;
+    const start = valueOffset(entry, byteLength);
+    if (start < 0 || start + byteLength > view.byteLength) return [];
+    const values: number[] = [];
+    for (let index = 0; index < entry.count; index += 1) {
+      const numerator = uint32(start + index * 8);
+      const denominator = uint32(start + index * 8 + 4);
+      if (!denominator) return [];
+      values.push(numerator / denominator);
     }
-    return result;
+    return values;
   };
-  const root = parseIfd(firstIfd, [0x0132, 0x8769]);
-  const exifPointer = root.get(0x8769)?.value;
+
+  const root = parseIfd(firstIfd, [0x0132, 0x8769, 0x8825]);
+  const exifPointer = readScalar(root.get(0x8769));
   const exif = exifPointer ? parseIfd(tiffStart + exifPointer, [0x9003, 0x9004]) : new Map();
-  const raw = exif.get(0x9003)?.text || exif.get(0x9004)?.text || root.get(0x0132)?.text;
+  const raw = readAscii(exif.get(0x9003)) || readAscii(exif.get(0x9004)) || readAscii(root.get(0x0132));
   const match = raw?.match(/(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute, second] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
-  return Number.isNaN(date.getTime()) ? null : date;
+  let capturedAt: Date | null = null;
+  if (match) {
+    const [, year, month, day, hour, minute, second] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    if (!Number.isNaN(date.getTime())) capturedAt = date;
+  }
+
+  const gpsPointer = readScalar(root.get(0x8825));
+  const gps = gpsPointer ? parseIfd(tiffStart + gpsPointer, [0x0001, 0x0002, 0x0003, 0x0004]) : new Map<number, TiffEntry>();
+  const latitudeValues = readRationals(gps.get(0x0002));
+  const longitudeValues = readRationals(gps.get(0x0004));
+  let location: PhotoLocation | undefined;
+  if (latitudeValues.length >= 3 && longitudeValues.length >= 3) {
+    const latitudeRef = readAscii(gps.get(0x0001)).toUpperCase();
+    const longitudeRef = readAscii(gps.get(0x0003)).toUpperCase();
+    const unsignedLatitude = latitudeValues[0] + latitudeValues[1] / 60 + latitudeValues[2] / 3600;
+    const unsignedLongitude = longitudeValues[0] + longitudeValues[1] / 60 + longitudeValues[2] / 3600;
+    const latitude = latitudeRef === "S" ? -unsignedLatitude : unsignedLatitude;
+    const longitude = longitudeRef === "W" ? -unsignedLongitude : unsignedLongitude;
+    if (Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) {
+      location = { latitude, longitude, source: "exif" };
+    }
+  }
+
+  return location ? { capturedAt, location } : { capturedAt };
 }

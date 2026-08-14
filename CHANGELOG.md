@@ -1,5 +1,11 @@
 # Journoid changelog
 
+## 0.8.0 — 2026-08-14
+
+- Added private, on-device extraction of embedded EXIF GPS coordinates during photo import.
+- Placed the saved location in pale gray above the photo comment in the full-screen 3D model view.
+- Kept photos without GPS metadata unchanged and preserved location data in the existing IndexedDB journal record.
+
 ## 0.7.1 — 2026-08-14
 
 - Changed both home-list and trip-form titles back to the `{month}월의 {city}` format.

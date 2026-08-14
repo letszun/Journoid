@@ -8,6 +8,7 @@
   --topbar-bg: rgba(255, 255, 255, 0.96);
   --placeholder: #e6e6e3;
   --comment: #4b4b4b;
+  --location: #a3a3a3;
   --disabled: #b9b9b9;
   --frame-outline: rgba(0, 0, 0, 0.09);
   --swatch-outline: rgba(0, 0, 0, 0.18);
@@ -46,6 +47,7 @@
   --topbar-bg: rgba(16, 16, 16, 0.96);
   --placeholder: #292929;
   --comment: #adadad;
+  --location: #777777;
   --disabled: #555555;
   --frame-outline: rgba(255, 255, 255, 0.18);
   --swatch-outline: rgba(255, 255, 255, 0.24);
@@ -724,21 +726,40 @@
   touch-action: none;
 }
 
-.model-caption {
+.model-copy {
   position: absolute;
   z-index: 2;
   top: calc(max(var(--gutter), env(safe-area-inset-top)) + 58px);
   left: 50%;
+  display: grid;
   width: min(calc(100% - (var(--gutter) * 4)), 360px);
   margin: 0;
   transform: translateX(-50%);
+  gap: 4px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.model-location,
+.model-caption {
+  margin: 0;
+}
+
+.model-location {
+  color: var(--location);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: 0.035em;
+  line-height: 1.35;
+}
+
+.model-caption {
   color: var(--comment);
   font-size: 10px;
   font-weight: 450;
   letter-spacing: -0.01em;
   line-height: 1.45;
-  text-align: center;
-  pointer-events: none;
 }
 
 .polaroid-model {

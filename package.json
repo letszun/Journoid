@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check:runtime": "node scripts/check-mobile-runtime.mjs",
+    "check:metadata": "node scripts/check-photo-metadata.mjs",
     "update:runtime-lock": "node scripts/update-mobile-runtime-lock.mjs",
     "test:runtime": "playwright test",
     "test:sites": "node --test tests/sites-worker.test.mjs",
