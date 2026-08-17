@@ -13,6 +13,7 @@ import {
   ColorWheelIcon,
   Cross1Icon,
   DotsHorizontalIcon,
+  GlobeIcon,
   ImageIcon,
   MinusIcon,
   MoveIcon,
@@ -27,9 +28,10 @@ import {
 } from "@radix-ui/react-icons";
 
 type PhotoLocation = {
-  latitude: number;
-  longitude: number;
-  source: "exif";
+  latitude?: number;
+  longitude?: number;
+  label?: string;
+  source: "exif" | "manual";
 };
 
 type PhotoRecord = {
@@ -44,7 +46,7 @@ type PhotoRecord = {
   location?: PhotoLocation;
 };
 
-type PhotoUpdate = Partial<Pick<PhotoRecord, "caption" | "drawing" | "frameColor" | "aspectRatio">>;
+type PhotoUpdate = Partial<Pick<PhotoRecord, "caption" | "drawing" | "frameColor" | "aspectRatio" | "location">>;
 
 type TripRecord = {
   id: string;
@@ -94,7 +96,7 @@ const DATABASE_NAME = "journoid";
 const DATABASE_VERSION = 1;
 const TRIPS_STORE = "journal";
 const TRIPS_RECORD_KEY = "trips";
-const APP_VERSION = "0.8.0";
+const APP_VERSION = "0.8.1";
 const DEFAULT_FRAME_COLOR = "#ffffff";
 const DEFAULT_PHOTO_ASPECT = 3 / 4;
 const FRAME_COLORS = ["#ffffff", "#eeeeeb", "#d5d5d1", "#777775", "#111111"];
@@ -222,6 +224,16 @@ function formatTripRange(startDate: string, endDate: string) {
   return `${formatter.format(new Date(`${startDate}T12:00:00`))} — ${formatter.format(new Date(`${endDate}T12:00:00`))}`;
 }
 
+export function formatDetailedTripRange(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T12:00:00`);
+  const end = new Date(`${endDate}T12:00:00`);
+  const fullFormatter = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "short", day: "numeric" });
+  const endFormatter = start.getFullYear() === end.getFullYear()
+    ? new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" })
+    : fullFormatter;
+  return `${fullFormatter.format(start)} — ${endFormatter.format(end)}`;
+}
+
 function validPhotoAspect(value?: number) {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.max(0.45, Math.min(2.4, value))
@@ -250,11 +262,13 @@ function isDifferentAspect(current: number | undefined, next: number) {
   return !current || Math.abs(validPhotoAspect(current) - next) > 0.001;
 }
 
-function formatPhotoLocation(location?: PhotoLocation) {
-  if (!location || !Number.isFinite(location.latitude) || !Number.isFinite(location.longitude)) return "";
-  const latitude = `${Math.abs(location.latitude).toFixed(4)}°${location.latitude >= 0 ? "N" : "S"}`;
-  const longitude = `${Math.abs(location.longitude).toFixed(4)}°${location.longitude >= 0 ? "E" : "W"}`;
-  return `${latitude} · ${longitude}`;
+export function formatPhotoLocation(location?: PhotoLocation, fallbackLabel = "") {
+  const label = location?.label?.trim() || fallbackLabel.trim();
+  const latitude = location?.latitude;
+  const longitude = location?.longitude;
+  if (typeof latitude !== "number" || !Number.isFinite(latitude) || typeof longitude !== "number" || !Number.isFinite(longitude)) return label;
+  const coordinates = `${Math.abs(latitude).toFixed(4)}°${latitude >= 0 ? "N" : "S"} · ${Math.abs(longitude).toFixed(4)}°${longitude >= 0 ? "E" : "W"}`;
+  return label ? `${label} · ${coordinates}` : coordinates;
 }
 
 function photoPeriod(date: Date): PhotoPeriod {
@@ -728,7 +742,7 @@ function TripDetail({
         <section className="trip-heading">
           <h1>{trip.city}</h1>
           <div className="trip-meta">
-            <span>{trip.country?.trim() ? `${trip.country.trim()} · ${formatTripRange(trip.startDate, trip.endDate)}` : formatTripRange(trip.startDate, trip.endDate)}</span>
+            <span>{trip.country?.trim() ? `${trip.country.trim()} · ${formatDetailedTripRange(trip.startDate, trip.endDate)}` : formatDetailedTripRange(trip.startDate, trip.endDate)}</span>
             <span>{String(trip.photos.length).padStart(2, "0")}</span>
           </div>
           {importNotice ? <p className="import-notice" role="status">{importNotice}</p> : null}
@@ -790,6 +804,7 @@ function TripDetail({
       {selectedPhoto ? (
         <PhotoViewer
           photo={selectedPhoto}
+          defaultLocation={[trip.city.trim(), trip.country?.trim()].filter(Boolean).join(" · ")}
           onClose={() => setSelectedPhotoId(null)}
           onSave={(next) => onUpdatePhoto(selectedPhoto.id, next)}
           onDelete={() => { onDeletePhoto(selectedPhoto.id); setSelectedPhotoId(null); }}
@@ -818,6 +833,7 @@ function ImportOverlay({ done, total }: { done: number; total: number }) {
 
 function PhotoViewer({
   photo,
+  defaultLocation,
   onClose,
   onSave,
   onDelete,
@@ -825,6 +841,7 @@ function PhotoViewer({
   onToggleTheme,
 }: {
   photo: PhotoRecord;
+  defaultLocation: string;
   onClose: () => void;
   onSave: (next: PhotoUpdate) => void;
   onDelete: () => void;
@@ -832,6 +849,7 @@ function PhotoViewer({
   const [mode, setMode] = useState<"model" | "edit">("model");
   const [rotation, setRotation] = useState({ x: -5, y: -16 });
   const [caption, setCaption] = useState(photo.caption);
+  const [locationText, setLocationText] = useState(photo.location?.label?.trim() || defaultLocation);
   const [drawing, setDrawing] = useState(photo.drawing ?? "");
   const [frameColor, setFrameColor] = useState(photo.frameColor ?? DEFAULT_FRAME_COLOR);
   const [aspectRatio, setAspectRatio] = useState(validPhotoAspect(photo.aspectRatio));
@@ -839,7 +857,10 @@ function PhotoViewer({
   const [menuOpen, setMenuOpen] = useState(false);
   const drag = useRef<{ id: number; x: number; y: number; distance: number } | null>(null);
   const drawingExporterRef = useRef<(() => Promise<string>) | null>(null);
-  const locationLabel = formatPhotoLocation(photo.location);
+  const locationForDisplay: PhotoLocation | undefined = locationText.trim()
+    ? { ...photo.location, label: locationText.trim(), source: photo.location?.source ?? "manual" }
+    : photo.location;
+  const locationLabel = formatPhotoLocation(locationForDisplay, defaultLocation);
 
   useEffect(() => {
     document.body.classList.add("viewer-open");
@@ -888,7 +909,11 @@ function PhotoViewer({
       // Fall back to the latest completed export if the canvas encoder is unavailable.
     }
     setDrawing(latestDrawing);
-    onSave({ caption: caption.trim(), drawing: latestDrawing || undefined, frameColor, aspectRatio });
+    const trimmedLocation = locationText.trim();
+    const nextLocation = trimmedLocation || photo.location
+      ? { ...photo.location, ...(trimmedLocation ? { label: trimmedLocation } : {}), source: photo.location?.source ?? "manual" } as PhotoLocation
+      : undefined;
+    onSave({ caption: caption.trim(), drawing: latestDrawing || undefined, frameColor, aspectRatio, location: nextLocation });
     setSaving(false);
     setMode("model");
   };
@@ -945,6 +970,8 @@ function PhotoViewer({
           onDrawingChange={setDrawing}
           caption={caption}
           onCaptionChange={setCaption}
+          location={locationText}
+          onLocationChange={setLocationText}
           frameColor={frameColor}
           onFrameColorChange={setFrameColor}
           aspectRatio={aspectRatio}
@@ -1092,6 +1119,8 @@ function PhotoEditor({
   onDrawingChange,
   caption,
   onCaptionChange,
+  location,
+  onLocationChange,
   frameColor,
   onFrameColorChange,
   aspectRatio,
@@ -1103,6 +1132,8 @@ function PhotoEditor({
   onDrawingChange: (value: string) => void;
   caption: string;
   onCaptionChange: (value: string) => void;
+  location: string;
+  onLocationChange: (value: string) => void;
   frameColor: string;
   onFrameColorChange: (value: string) => void;
   aspectRatio: number;
@@ -1494,6 +1525,10 @@ function PhotoEditor({
           <input type="color" value={frameColor} onChange={(event) => onFrameColorChange(event.target.value)} />
         </label>
       </div>
+      <label className="location-editor">
+        <GlobeIcon />
+        <input value={location} maxLength={80} onChange={(event) => onLocationChange(event.target.value)} placeholder="위치" />
+      </label>
       <label className="comment-editor">
         <Pencil1Icon />
         <textarea value={caption} maxLength={80} rows={2} onChange={(event) => onCaptionChange(event.target.value)} placeholder="코멘트" />

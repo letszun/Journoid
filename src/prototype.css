@@ -1055,16 +1055,29 @@
   opacity: 0;
 }
 
+.location-editor,
 .comment-editor {
   display: grid;
   width: min(100%, 440px);
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 8px;
-  margin: 20px auto 0;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--line);
+  margin-right: auto;
+  margin-left: auto;
 }
 
+.location-editor {
+  margin: 20px auto 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.comment-editor {
+  margin-top: 0;
+  padding: 12px 0 0;
+}
+
+.location-editor svg,
 .comment-editor svg {
   width: 16px;
   height: 16px;
@@ -1072,6 +1085,7 @@
   color: var(--muted);
 }
 
+.location-editor input,
 .comment-editor textarea {
   width: 100%;
   padding: 0;
@@ -1084,6 +1098,7 @@
   resize: none;
 }
 
+.location-editor input::placeholder,
 .comment-editor textarea::placeholder {
   color: var(--muted);
 }

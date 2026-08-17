@@ -8,7 +8,7 @@ const server = await createServer({
 });
 
 try {
-  const { parseExifTiff } = await server.ssrLoadModule("/src/Prototype.tsx");
+  const { formatDetailedTripRange, formatPhotoLocation, parseExifTiff } = await server.ssrLoadModule("/src/Prototype.tsx");
   const buffer = new ArrayBuffer(256);
   const view = new DataView(buffer);
   const writeEntry = (offset, tag, type, count, value) => {
@@ -54,6 +54,9 @@ try {
   assert.ok(Math.abs(metadata.location.latitude - 48.2083333333) < 0.000001);
   assert.ok(Math.abs(metadata.location.longitude - 16.3736111111) < 0.000001);
   assert.equal(metadata.location.source, "exif");
+  assert.equal(formatPhotoLocation(undefined, "비엔나 · 오스트리아"), "비엔나 · 오스트리아");
+  assert.equal(formatPhotoLocation(metadata.location, "비엔나 · 오스트리아"), "비엔나 · 오스트리아 · 48.2083°N · 16.3736°E");
+  assert.equal(formatDetailedTripRange("2026-10-01", "2026-11-01"), "2026년 10월 1일 — 11월 1일");
   process.stdout.write("EXIF date and GPS metadata check passed.\n");
 } finally {
   await server.close();

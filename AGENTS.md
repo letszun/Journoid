@@ -18,7 +18,7 @@
 - The doodle editor supports 1×–3× zoom, two-finger pinch, and panning with the move tool. Frame color changes are saved per photo; the default UI stays monochrome while a custom color picker remains available.
 - The doodle editor offers a crisp pressure-aware pen, textured pencil, and translucent highlighter. Every brush supports preset and custom colors without changing the app's neutral interface palette.
 - Saved comments appear centered near the top of the full-screen 3D model view. The model uses front, back, and all four edge planes so its surface remains visible through every allowed rotation angle.
-- Preserve EXIF GPS coordinates when importing supported photos. In the 3D model view, show the coordinate label first in pale gray at the existing centered note position, with any saved comment directly below it. Photos without embedded GPS stay visually unchanged.
+- Preserve EXIF GPS coordinates when importing supported photos. In the 3D model view, show a human-readable location first in pale gray at the existing centered note position, with any saved comment directly below it. Use the trip's `city · country` as the visible fallback when a browser strips GPS metadata, append coordinates when available, and keep the location editable in the photo editor.
 - Batch photo imports use a dedicated full-screen progress view. Keep the underlying gallery out of sight until the responsive two-file batch pipeline has finished.
 - Persist the full journal, including image and drawing data, in the `journoid` IndexedDB database. Keep `journoid.storage` as the permanent unversioned local-storage pointer, automatically migrate `journoid-trips-v2` and `journey-polaroid-trips-v1`, and use `journoid.trips` only as a fallback when IndexedDB is unavailable.
 - Keep drawing input low-latency: never synchronously encode PNG data at pointer-down, collect coalesced pointer samples, smooth pressure, render the active stroke on a separate canvas, and composite translucent marker strokes only once so segment joins do not form dark dots.
@@ -26,6 +26,7 @@
 - Keep trip galleries airy and compact: use three small 2D polaroids per mobile row, four on wider screens, a thin 4px frame inset, at least 12px horizontal separation, and 32px row spacing.
 - Home journey rows use restrained 20–30px titles and compact 52px photo previews; they should read as an index rather than a second gallery.
 - Inside a trip, show the city without a redundant `{month}월의` eyebrow. Date group headers show only the zero-padded day and weekday, never the month already present in the trip range.
+- The trip detail metadata includes the start year; keep compact home-list date ranges yearless. Repeat the year on the end date only when a trip crosses into another year.
 - Trip country, city, start date, and end date remain editable from the trip's three-dot menu without replacing its photos or other saved content.
 - Group photos in this display order and at these exact boundaries: 아침 05:00–11:29, 점심 11:30–14:29, 오후 14:30–17:29, 저녁 17:30–21:29, 밤 21:30–01:59, 새벽 02:00–04:59.
 - Put the current semantic `APP_VERSION` inside the three-dot settings menu instead of displaying it in headers. Increment it for each published update and record user-visible changes in `CHANGELOG.md` so a home-screen installation can be checked against the latest deployment.

@@ -1,5 +1,11 @@
 # Journoid changelog
 
+## 0.8.1 — 2026-08-17
+
+- Added a reliable `city · country` location fallback when iPhone or browser photo pickers remove GPS metadata.
+- Added editable photo locations in the doodle and comment detail screen while keeping EXIF coordinates when available.
+- Added the year to the date range on each individual trip page without enlarging the home-list date label.
+
 ## 0.8.0 — 2026-08-14
 
 - Added private, on-device extraction of embedded EXIF GPS coordinates during photo import.
